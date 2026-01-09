@@ -662,7 +662,7 @@ class MainWindow(QMainWindow):
 
     def _update_level(self, level: int):
         """Update audio level bar."""
-        self.level_bar.setValue(level)
+        self.level_bar.setValue(int(level))
 
     def _update_stats_display(self):
         """Update statistics display."""
