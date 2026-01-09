@@ -1,0 +1,33 @@
+# WhisperTyping - Voice Transcription App
+# Core dependencies
+
+# GUI
+PyQt6>=6.5.0
+
+# Audio recording
+sounddevice>=0.4.6
+soundfile>=0.12.1
+numpy>=1.24.0
+
+# Whisper for transcription
+faster-whisper>=1.0.0
+openai-whisper>=20231117
+
+# Global hotkeys
+pynput>=1.7.6
+keyboard>=0.13.5
+
+# Auto-typing
+pyperclip>=1.8.2
+pyautogui>=0.9.54
+
+# System tray
+pystray>=0.19.5
+Pillow>=10.0.0
+
+# Configuration
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# For Windows/Linux compatibility
+platformdirs>=4.0.0

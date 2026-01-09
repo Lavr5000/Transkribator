@@ -1,0 +1,125 @@
+"""Configuration management for WhisperTyping."""
+import json
+import os
+from dataclasses import dataclass, field, asdict
+from pathlib import Path
+from typing import Optional
+import platformdirs
+
+
+@dataclass
+class Config:
+    """Application configuration."""
+
+    # Whisper settings
+    model_size: str = "base"  # tiny, base, small, medium, large
+    language: str = "auto"  # auto-detect or specific language code
+    device: str = "auto"  # auto, cpu, cuda
+    compute_type: str = "auto"  # auto, int8, float16, float32
+
+    # Audio settings
+    sample_rate: int = 16000
+    channels: int = 1
+
+    # Hotkey settings
+    hotkey: str = "ctrl+shift+space"  # Global hotkey to start/stop recording
+
+    # Behavior settings
+    auto_copy: bool = True  # Auto copy to clipboard
+    auto_paste: bool = True  # Auto paste after transcription
+    auto_enter: bool = False  # Press Enter after paste
+
+    # UI settings
+    always_on_top: bool = True
+    minimize_to_tray: bool = True
+    show_notifications: bool = True
+    dark_mode: bool = True
+
+    # Statistics
+    total_words: int = 0
+    total_recordings: int = 0
+    total_seconds_saved: float = 0.0
+
+    @classmethod
+    def get_config_dir(cls) -> Path:
+        """Get the configuration directory."""
+        config_dir = Path(platformdirs.user_config_dir("WhisperTyping", "WhisperTyping"))
+        config_dir.mkdir(parents=True, exist_ok=True)
+        return config_dir
+
+    @classmethod
+    def get_config_path(cls) -> Path:
+        """Get the configuration file path."""
+        return cls.get_config_dir() / "config.json"
+
+    @classmethod
+    def load(cls) -> "Config":
+        """Load configuration from file."""
+        config_path = cls.get_config_path()
+        if config_path.exists():
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                return cls(**data)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return cls()
+
+    def save(self) -> None:
+        """Save configuration to file."""
+        config_path = self.get_config_path()
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(asdict(self), f, indent=2)
+
+    def update_stats(self, words: int, duration: float) -> None:
+        """Update usage statistics."""
+        self.total_words += words
+        self.total_recordings += 1
+        # Assume typing speed of 40 WPM, calculate time saved
+        typing_time = (words / 40) * 60  # seconds
+        self.total_seconds_saved += max(0, typing_time - duration)
+        self.save()
+
+
+# Available Whisper models
+WHISPER_MODELS = {
+    "tiny": "Tiny (~1GB VRAM, fastest)",
+    "base": "Base (~1GB VRAM, fast)",
+    "small": "Small (~2GB VRAM, balanced)",
+    "medium": "Medium (~5GB VRAM, accurate)",
+    "large": "Large (~10GB VRAM, most accurate)",
+    "large-v3": "Large V3 (~10GB VRAM, latest)"
+}
+
+# Supported languages
+LANGUAGES = {
+    "auto": "Auto-detect",
+    "en": "English",
+    "ru": "Russian",
+    "es": "Spanish",
+    "fr": "French",
+    "de": "German",
+    "it": "Italian",
+    "pt": "Portuguese",
+    "zh": "Chinese",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "ar": "Arabic",
+    "hi": "Hindi",
+    "tr": "Turkish",
+    "pl": "Polish",
+    "uk": "Ukrainian",
+    "nl": "Dutch",
+    "sv": "Swedish",
+    "cs": "Czech",
+    "ro": "Romanian",
+    "hu": "Hungarian",
+    "el": "Greek",
+    "fi": "Finnish",
+    "da": "Danish",
+    "no": "Norwegian",
+    "th": "Thai",
+    "vi": "Vietnamese",
+    "id": "Indonesian",
+    "ms": "Malay",
+}
