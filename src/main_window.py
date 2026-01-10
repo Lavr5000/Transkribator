@@ -177,6 +177,8 @@ class RecordButton(QPushButton):
         self._anim_timer.timeout.connect(self._animate)
 
     def set_recording(self, recording: bool):
+        with open("debug.log", "a") as f:
+            f.write(f"[DEBUG] RecordButton.set_recording called: {recording}\n")
         self._recording = recording
         if recording:
             self._anim_timer.start(50)
@@ -621,8 +623,15 @@ class MainWindow(QMainWindow):
         self._drag_pos = None
         self._settings = None
         self._recording = False
+        self._transcribing = False  # Track transcription state separately
         self._last_text = ""
         self._hover = False
+        # Store durations for displaying after transcription
+        self._rec_duration = 0.0  # Recording duration
+        self._transcription_duration = 0.0  # Transcription duration
+        # Debounce for button clicks (prevent double-taps)
+        self._last_click_time = 0.0
+        self._click_debounce_ms = 300  # Require 300ms between clicks
 
         self._setup_ui()
         self._setup_tray()
@@ -743,6 +752,8 @@ class MainWindow(QMainWindow):
         self.audio_level_update.emit(min(1.0, level * 10))
 
     def _on_progress(self, msg):
+        with open("debug.log", "a") as f:
+            f.write(f"[DEBUG] _on_progress called: msg='{msg}'\n")
         self.status_update.emit(msg)
 
     def _on_hotkey(self):
@@ -751,8 +762,26 @@ class MainWindow(QMainWindow):
         self._toggle_recording()
 
     def _toggle_recording(self):
+        # Debounce: prevent double-clicks
+        current_time = time.time() * 1000  # Convert to ms
+        time_since_last_click = current_time - self._last_click_time
+
+        if time_since_last_click < self._click_debounce_ms:
+            with open("debug.log", "a") as f:
+                f.write(f"[DEBUG] Ignoring click (debounce): {time_since_last_click:.0f}ms < {self._click_debounce_ms}ms\n")
+            return
+
+        self._last_click_time = current_time
+
         with open("debug.log", "a") as f:
-            f.write(f"[DEBUG] Toggle recording. Current state: {self._recording}\n")
+            f.write(f"[DEBUG] Toggle recording. Current state: recording={self._recording}, transcribing={self._transcribing}\n")
+
+        # Don't allow toggle while transcribing
+        if self._transcribing:
+            with open("debug.log", "a") as f:
+                f.write("[DEBUG] Ignoring toggle: transcription in progress\n")
+            return
+
         if self._recording:
             self._stop()
         else:
@@ -767,6 +796,8 @@ class MainWindow(QMainWindow):
         if success:
             self._recording = True
             self._rec_start = time.time()
+            with open("debug.log", "a") as f:
+                f.write("[DEBUG] Setting status to: Слушаю\n")
             self.status_label.setText("Слушаю")
             self.status_label.adjustSize()
             # Position timer after status text with some padding
@@ -782,9 +813,18 @@ class MainWindow(QMainWindow):
         with open("debug.log", "a") as f:
             f.write("[DEBUG] Stopping recording...\n")
 
-        self._recording = False
+        # Save recording duration before stopping timer
+        self._rec_duration = time.time() - self._rec_start
+        with open("debug.log", "a") as f:
+            f.write(f"[DEBUG] Recording duration: {self._rec_duration:.2f}s\n")
+
         # Don't stop timer - keep showing elapsed time during transcription
         audio = self.recorder.stop()
+
+        # CRITICAL: Only set _recording to False AFTER stopping the recorder
+        # This prevents status flickering during transcription
+        self._recording = False
+        self._transcribing = True  # Mark that we're now transcribing
 
         self.record_btn.set_recording(False)
         self.tray_rec.setText("Запись")
@@ -792,17 +832,24 @@ class MainWindow(QMainWindow):
         if audio is None or len(audio) == 0 or self.recorder.get_duration(audio) < 0.5:
             with open("debug.log", "a") as f:
                 f.write(f"[DEBUG] Audio too short or empty: {audio is None}, len={len(audio) if audio is not None else 0}\n")
+            with open("debug.log", "a") as f:
+                f.write("[DEBUG] Setting status to: Готово\n")
             self.status_label.setText("Готово")
             # Stop and hide timer for short audio
             self._rec_timer.stop()
             self.timer_label.hide()
+            self._transcribing = False  # Reset transcription state
             return
 
         duration = self.recorder.get_duration(audio)
         with open("debug.log", "a") as f:
             f.write(f"[DEBUG] Starting transcription. Audio duration: {duration:.2f}s, samples: {len(audio)}\n")
 
+        with open("debug.log", "a") as f:
+            f.write("[DEBUG] Setting status to: Текст...\n")
         self.status_label.setText("Текст...")
+        # Reset timer to show transcription time starting from zero
+        self._rec_start = time.time()
         self._thread = TranscriptionThread(self.transcriber, audio, self.config.sample_rate)
         self._thread.finished.connect(self._done)
         self._thread.error.connect(self._error)
@@ -812,21 +859,50 @@ class MainWindow(QMainWindow):
         self.timer_label.setText(f"{time.time() - self._rec_start:.1f}s")
 
     def _done(self, text, duration):
+        # Save transcription duration
+        self._transcription_duration = duration
+
+        # Mark transcription as complete
+        self._transcribing = False
+
         with open("debug.log", "a") as f:
             f.write(f"[DEBUG] Transcription done! Text: '{text[:100]}...', Duration: {duration}s\n")
 
+        try:
+            with open("debug.log", "a") as f:
+                f.write(f"[DEBUG] Recording: {self._rec_duration:.1f}s -> Transcription: {self._transcription_duration:.1f}s\n")
+        except Exception as e:
+            with open("debug.log", "a") as f:
+                f.write(f"[ERROR] Failed to write timing: {e}\n")
+
         self._last_text = text
+        with open("debug.log", "a") as f:
+            f.write("[DEBUG] Setting status to: Готово\n")
         self.status_label.setText("Готово")
 
-        # Stop and hide timer now that transcription is complete
+        # Stop timer but show summary for 3 seconds
         self._rec_timer.stop()
-        self.timer_label.hide()
 
-        if self._settings and self._settings.isVisible():
+        # Show "recording -> transcription" summary
+        self.timer_label.setText(f"{self._rec_duration:.1f}s -> {self._transcription_duration:.1f}s")
+        self.timer_label.show()
+
+        # Hide timer after 3 seconds
+        QTimer.singleShot(3000, lambda: self.timer_label.hide())
+
+        with open("debug.log", "a") as f:
+            f.write(f"[DEBUG] Checking settings window: self._settings={self._settings is not None}\n")
+
+        if self._settings:
+            with open("debug.log", "a") as f:
+                f.write(f"[DEBUG] Updating settings window with text (length: {len(text)})\n")
             self._settings.text_edit.setPlainText(text)
             self._settings.status_label.setText(f"Готово ({duration:.1f}с)")
             self._settings.update_stats_display()
             self._settings._update_history_display()
+        else:
+            with open("debug.log", "a") as f:
+                f.write(f"[DEBUG] Settings window not created\n")
 
         self.config.update_stats(len(text.split()), time.time() - self._rec_start)
         self.history_manager.add_entry(text, duration, self.config.backend, self.config.model_size)
@@ -843,6 +919,9 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(100, lambda: self._type(text))
 
     def _error(self, err):
+        # Mark transcription as complete even on error
+        self._transcribing = False
+
         with open("debug.log", "a") as f:
             f.write(f"[ERROR] Transcription error: {err}\n")
         self.status_label.setText("Ошибка")
@@ -852,14 +931,30 @@ class MainWindow(QMainWindow):
         self.timer_label.hide()
 
     def _type(self, text):
+        with open("debug.log", "a") as f:
+            f.write(f"[DEBUG] _type called with text length: {len(text)}\n")
         try:
             type_text(text)
-        except:
-            pass
+            with open("debug.log", "a") as f:
+                f.write(f"[DEBUG] Text typed successfully\n")
+        except Exception as e:
+            with open("debug.log", "a") as f:
+                f.write(f"[ERROR] Failed to type text: {e}\n")
 
     def _set_status(self, msg):
-        if not self._recording:
-            self.status_label.setText(msg)
+        with open("debug.log", "a") as f:
+            f.write(f"[DEBUG] _set_status called: msg='{msg}', _recording={self._recording}, _transcribing={self._transcribing}\n")
+
+        # Ignore status updates during recording OR transcription
+        # This prevents flickering: "Текст..." -> "Слушаю" -> "Текст..."
+        if self._recording or self._transcribing:
+            with open("debug.log", "a") as f:
+                f.write(f"[DEBUG] Ignoring status change: recording={self._recording}, transcribing={self._transcribing}\n")
+            return
+
+        with open("debug.log", "a") as f:
+            f.write(f"[DEBUG] Setting status_label to: '{msg}'\n")
+        self.status_label.setText(msg)
 
     def _set_level(self, level):
         if self._recording:
