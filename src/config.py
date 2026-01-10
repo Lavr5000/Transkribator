@@ -30,6 +30,10 @@ class Config:
     # Hotkey settings
     hotkey: str = "ctrl+shift+space"  # Global hotkey to start/stop recording
 
+    # Mouse button settings
+    mouse_button: str = "middle"  # Mouse button for recording: none, left, middle, right, x1, x2
+    enable_mouse_button: bool = False  # Enable mouse button recording
+
     # Behavior settings
     auto_copy: bool = True  # Auto copy to clipboard
     auto_paste: bool = True  # Auto paste after transcription
@@ -146,4 +150,14 @@ LANGUAGES = {
     "vi": "Vietnamese",
     "id": "Indonesian",
     "ms": "Malay",
+}
+
+# Available mouse buttons for recording
+MOUSE_BUTTONS = {
+    "none": "Отключено",
+    "left": "Левая кнопка",
+    "middle": "Средняя кнопка (колесо)",
+    "right": "Правая кнопка",
+    "x1": "Кнопка X1 (вперед)",
+    "x2": "Кнопка X2 (назад)",
 }

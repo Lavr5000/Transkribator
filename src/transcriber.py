@@ -159,18 +159,33 @@ class Transcriber:
         Returns:
             Tuple of (transcribed text, processing time in seconds)
         """
+        with open("debug.log", "a") as f:
+            f.write(f"[DEBUG] Transcriber.transcribe called. Backend: {self.backend_name}, Audio shape: {audio.shape}, SR: {sample_rate}\n")
+
         if self._backend is None:
+            with open("debug.log", "a") as f:
+                f.write("[DEBUG] Backend is None, creating...\n")
             self._create_backend()
 
         start_time = time.time()
 
         try:
             # Transcribe using backend
+            with open("debug.log", "a") as f:
+                f.write(f"[DEBUG] Calling backend.transcribe...\n")
+
             text, backend_time = self._backend.transcribe(audio, sample_rate)
+
+            with open("debug.log", "a") as f:
+                f.write(f"[DEBUG] Backend returned text: '{text[:100] if text else '(empty)'}', Time: {backend_time}s\n")
 
             # Apply post-processing to improve text quality
             if self.enable_post_processing and self.text_processor:
+                with open("debug.log", "a") as f:
+                    f.write(f"[DEBUG] Applying post-processing...\n")
                 text = self.text_processor.process(text)
+                with open("debug.log", "a") as f:
+                    f.write(f"[DEBUG] Post-processing done: '{text[:100]}'\n")
 
             process_time = time.time() - start_time
 
@@ -180,6 +195,10 @@ class Transcriber:
             return text, process_time
 
         except Exception as e:
+            with open("debug.log", "a") as f:
+                f.write(f"[ERROR] Transcriber.transcribe exception: {e}\n")
+                import traceback
+                f.write(f"[ERROR] Traceback: {traceback.format_exc()}\n")
             if self.on_progress:
                 self.on_progress(f"Error: {e}")
             return "", 0.0
@@ -203,11 +222,23 @@ class Transcriber:
     def load_model(self) -> bool:
         """Load the backend model."""
         try:
+            with open("debug.log", "a") as f:
+                f.write(f"[DEBUG] Loading model. Backend: {self.backend_name}, Backend exists: {self._backend is not None}\n")
+
             if self._backend:
                 self._backend.load_model()
+                with open("debug.log", "a") as f:
+                    f.write(f"[DEBUG] Model loaded successfully\n")
                 return True
+
+            with open("debug.log", "a") as f:
+                f.write(f"[DEBUG] Backend is None, cannot load model\n")
             return False
-        except Exception:
+        except Exception as e:
+            with open("debug.log", "a") as f:
+                f.write(f"[ERROR] Failed to load model: {e}\n")
+                import traceback
+                f.write(f"[ERROR] Traceback: {traceback.format_exc()}\n")
             return False
 
     def unload_model(self) -> None:
