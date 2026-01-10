@@ -628,7 +628,8 @@ class MainWindow(QMainWindow):
         self._setup_tray()
         self._connect_signals()
         self.hotkey_manager.register(self.config.hotkey)
-        QTimer.singleShot(1000, self._load_model)
+        # Preload model immediately (in background thread) to eliminate cold start
+        QTimer.singleShot(100, self._load_model)
 
     def _setup_ui(self):
         self.setWindowTitle("ГолосТекст")
@@ -729,7 +730,14 @@ class MainWindow(QMainWindow):
         self.audio_level_update.connect(self._set_level)
 
     def _load_model(self):
-        threading.Thread(target=self.transcriber.load_model, daemon=True).start()
+        # Show loading status
+        self.status_label.setText("Загрузка модели...")
+        def load_with_callback():
+            self.transcriber.load_model()
+            # Update status when loaded (thread-safe Qt signal)
+            self.status_update.emit("Готово")
+
+        threading.Thread(target=load_with_callback, daemon=True).start()
 
     def _on_audio_level(self, level):
         self.audio_level_update.emit(min(1.0, level * 10))
