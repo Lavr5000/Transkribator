@@ -109,7 +109,7 @@ class Transcriber:
         Switch to a different backend.
 
         Args:
-            backend: New backend name (whisper, sherpa)
+            backend: New backend name (whisper, sherpa, podlodka-turbo)
             model_size: Optional new model size
         """
         with self._lock:
@@ -124,6 +124,22 @@ class Transcriber:
             self.backend_name = backend
             if model_size:
                 self.model_size = model_size
+
+            # Recreate text processor for new backend
+            # Sherpa needs EnhancedTextProcessor (with punctuation)
+            # Others use AdvancedTextProcessor (already have punctuation)
+            lang_code = self.language or "ru"
+            if backend == "sherpa" and ENHANCED_PROCESSOR_AVAILABLE:
+                self.text_processor = EnhancedTextProcessor(
+                    language=lang_code,
+                    enable_corrections=self._enable_post_processing,
+                    enable_punctuation=True
+                )
+            else:
+                self.text_processor = AdvancedTextProcessor(
+                    language=lang_code,
+                    enable_corrections=self._enable_post_processing
+                )
 
             # Create new backend
             self._create_backend()

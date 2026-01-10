@@ -1,4 +1,4 @@
-"""Main window for WhisperTyping application."""
+"""Main window for ГолосТекст application."""
 import sys
 import time
 import threading
@@ -26,7 +26,7 @@ except ImportError:
     CLIPBOARD_AVAILABLE = False
 
 
-# Modern dark theme colors (similar to WhisperTyping)
+# Modern dark theme colors (similar to ГолосТекст)
 COLORS = {
     'bg_dark': '#1a1a2e',
     'bg_medium': '#16213e',
@@ -302,7 +302,7 @@ class MainWindow(QMainWindow):
 
     def _setup_ui(self):
         """Setup the user interface."""
-        self.setWindowTitle("WhisperTyping")
+        self.setWindowTitle("ГолосТекст")
         self.setMinimumSize(400, 500)
         self.resize(450, 550)
 
@@ -323,7 +323,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(15)
 
         # Title
-        title_label = QLabel("WhisperTyping")
+        title_label = QLabel("ГолосТекст")
         title_label.setObjectName("titleLabel")
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title_label)
@@ -848,7 +848,7 @@ class MainWindow(QMainWindow):
 def run():
     """Run the application."""
     app = QApplication(sys.argv)
-    app.setApplicationName("WhisperTyping")
+    app.setApplicationName("ГолосТекст")
     app.setQuitOnLastWindowClosed(False)
 
     window = MainWindow()
