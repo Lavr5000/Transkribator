@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread, QSize
 from PyQt6.QtGui import QIcon, QPixmap, QFont, QAction, QColor, QPalette
 
-from .config import Config, WHISPER_MODELS, LANGUAGES
+from .config import Config, WHISPER_MODELS, SHERPA_MODELS, LANGUAGES, BACKENDS
 from .audio_recorder import AudioRecorder
 from .transcriber import Transcriber, get_available_backend
 from .hotkeys import HotkeyManager, type_text
@@ -275,6 +275,7 @@ class MainWindow(QMainWindow):
         )
 
         self.transcriber = Transcriber(
+            backend=self.config.backend,
             model_size=self.config.model_size,
             device=self.config.device,
             compute_type=self.config.compute_type,
@@ -396,16 +397,27 @@ class MainWindow(QMainWindow):
         settings_tab = QWidget()
         settings_layout = QVBoxLayout(settings_tab)
 
-        # Model selection
-        model_group = QGroupBox("Whisper Model")
+        # Backend selection
+        backend_group = QGroupBox("Speech Recognition Backend")
+        backend_layout = QVBoxLayout(backend_group)
+
+        self.backend_combo = QComboBox()
+        for backend_id, backend_name in BACKENDS.items():
+            self.backend_combo.addItem(backend_name, backend_id)
+
+        current_backend_idx = list(BACKENDS.keys()).index(self.config.backend)
+        self.backend_combo.setCurrentIndex(current_backend_idx)
+        self.backend_combo.currentIndexChanged.connect(self._on_backend_changed)
+        backend_layout.addWidget(self.backend_combo)
+
+        settings_layout.addWidget(backend_group)
+
+        # Model selection (dynamically updated based on backend)
+        model_group = QGroupBox("Model")
         model_layout = QVBoxLayout(model_group)
 
         self.model_combo = QComboBox()
-        for model_id, model_name in WHISPER_MODELS.items():
-            self.model_combo.addItem(model_name, model_id)
-
-        current_idx = list(WHISPER_MODELS.keys()).index(self.config.model_size)
-        self.model_combo.setCurrentIndex(current_idx)
+        self._update_model_options()  # Populate based on current backend
         self.model_combo.currentIndexChanged.connect(self._on_model_changed)
         model_layout.addWidget(self.model_combo)
 
@@ -683,6 +695,56 @@ class MainWindow(QMainWindow):
         self.stats_recordings.setText(f"Recordings: {self.config.total_recordings:,}")
         saved_mins = self.config.total_seconds_saved / 60
         self.stats_saved.setText(f"Time saved: {saved_mins:.1f} minutes")
+
+    def _update_model_options(self):
+        """Update model combo box based on selected backend."""
+        self.model_combo.clear()
+
+        current_backend = self.backend_combo.currentData()
+
+        if current_backend == "whisper":
+            for model_id, model_name in WHISPER_MODELS.items():
+                self.model_combo.addItem(model_name, model_id)
+        elif current_backend == "sherpa":
+            for model_id, model_name in SHERPA_MODELS.items():
+                self.model_combo.addItem(model_name, model_id)
+
+        # Set current model
+        models = WHISPER_MODELS if current_backend == "whisper" else SHERPA_MODELS
+        model_keys = list(models.keys())
+
+        if self.config.model_size in model_keys:
+            current_idx = model_keys.index(self.config.model_size)
+            self.model_combo.setCurrentIndex(current_idx)
+        elif model_keys:
+            self.model_combo.setCurrentIndex(0)
+
+    def _on_backend_changed(self, index: int):
+        """Handle backend selection change."""
+        backend_id = self.backend_combo.currentData()
+
+        if backend_id != self.config.backend:
+            self.config.backend = backend_id
+            self.config.save()
+
+            # Update model options for new backend
+            self._update_model_options()
+
+            # Update default model for new backend
+            if backend_id == "whisper":
+                default_model = "base"
+            elif backend_id == "sherpa":
+                default_model = "giga-am-v2-ru"
+            else:
+                default_model = list(self.model_combo.currentData().keys())[0] if self.model_combo.count() > 0 else "base"
+
+            self.config.model_size = default_model
+            self.config.save()
+
+            # Recreate transcriber with new backend
+            self.transcriber.switch_backend(backend_id, default_model)
+
+            self.status_label.setText(f"Backend changed to {backend_id}")
 
     def _on_model_changed(self, index: int):
         """Handle model selection change."""

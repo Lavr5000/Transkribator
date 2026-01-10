@@ -11,8 +11,12 @@ import platformdirs
 class Config:
     """Application configuration."""
 
-    # Whisper settings
-    model_size: str = "base"  # tiny, base, small, medium, large
+    # Backend selection
+    backend: str = "whisper"  # whisper, sherpa
+
+    # Model settings
+    model_size: str = "base"  # For Whisper: tiny, base, small, medium, large
+                              # For Sherpa: giga-am-v2-ru, giga-am-ru
     language: str = "auto"  # auto-detect or specific language code
     device: str = "auto"  # auto, cpu, cuda
     compute_type: str = "auto"  # auto, int8, float16, float32
@@ -82,6 +86,12 @@ class Config:
         self.save()
 
 
+# Available backends
+BACKENDS = {
+    "whisper": "Whisper (OpenAI)",
+    "sherpa": "Sherpa-ONNX (GigaAM Russian)",
+}
+
 # Available Whisper models
 WHISPER_MODELS = {
     "tiny": "Tiny (~1GB VRAM, fastest)",
@@ -90,6 +100,12 @@ WHISPER_MODELS = {
     "medium": "Medium (~5GB VRAM, accurate)",
     "large": "Large (~10GB VRAM, most accurate)",
     "large-v3": "Large V3 (~10GB VRAM, latest)"
+}
+
+# Available Sherpa-ONNX models
+SHERPA_MODELS = {
+    "giga-am-v2-ru": "GigaAM v2 Russian (2025, recommended)",
+    "giga-am-ru": "GigaAM Russian (2024)",
 }
 
 # Supported languages
