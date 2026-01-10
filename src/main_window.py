@@ -783,10 +783,9 @@ class MainWindow(QMainWindow):
             f.write("[DEBUG] Stopping recording...\n")
 
         self._recording = False
-        self._rec_timer.stop()
+        # Don't stop timer - keep showing elapsed time during transcription
         audio = self.recorder.stop()
 
-        self.timer_label.hide()
         self.record_btn.set_recording(False)
         self.tray_rec.setText("Запись")
 
@@ -794,6 +793,9 @@ class MainWindow(QMainWindow):
             with open("debug.log", "a") as f:
                 f.write(f"[DEBUG] Audio too short or empty: {audio is None}, len={len(audio) if audio is not None else 0}\n")
             self.status_label.setText("Готово")
+            # Stop and hide timer for short audio
+            self._rec_timer.stop()
+            self.timer_label.hide()
             return
 
         duration = self.recorder.get_duration(audio)
@@ -815,6 +817,10 @@ class MainWindow(QMainWindow):
 
         self._last_text = text
         self.status_label.setText("Готово")
+
+        # Stop and hide timer now that transcription is complete
+        self._rec_timer.stop()
+        self.timer_label.hide()
 
         if self._settings and self._settings.isVisible():
             self._settings.text_edit.setPlainText(text)
@@ -840,6 +846,10 @@ class MainWindow(QMainWindow):
         with open("debug.log", "a") as f:
             f.write(f"[ERROR] Transcription error: {err}\n")
         self.status_label.setText("Ошибка")
+
+        # Stop and hide timer on error
+        self._rec_timer.stop()
+        self.timer_label.hide()
 
     def _type(self, text):
         try:
