@@ -62,6 +62,7 @@ class SherpaBackend(BaseBackend):
         language: str = "auto",
         on_progress: Optional[Callable[[str], None]] = None,
         model_path: Optional[str] = None,
+        num_threads: Optional[int] = None,
     ):
         """
         Initialize Sherpa-ONNX backend.
@@ -73,12 +74,18 @@ class SherpaBackend(BaseBackend):
             language: Language code (auto defaults to ru for GigaAM)
             on_progress: Callback for progress updates
             model_path: Optional path to model directory (if not default)
+            num_threads: Number of threads for ONNX runtime (default: cpu_count)
         """
         super().__init__(model_size, device, compute_type, language, on_progress)
         self.model_path = model_path
+        # Auto-detect optimal thread count (default to cpu_count, max 8 for stability)
+        cpu_count = os.cpu_count() or 4
+        self.num_threads = max(1, min(num_threads or cpu_count, 8)) if num_threads is not None else max(1, min(cpu_count, 8))
         self._recognizer = None
         self._loading = False
         self._lock = threading.Lock()
+        # Cache for model files check result
+        self._model_files_checked = None
 
         # Force Russian language for GigaAM models
         if self.model_size.startswith("giga-am"):
@@ -94,19 +101,27 @@ class SherpaBackend(BaseBackend):
         return base_dir / self.model_size
 
     def _check_model_files(self) -> bool:
-        """Check if required model files exist."""
+        """Check if required model files exist (with caching)."""
+        # Return cached result if available
+        if self._model_files_checked is not None:
+            return self._model_files_checked
+
         model_dir = self._get_model_dir()
 
         if not model_dir.exists():
+            self._model_files_checked = False
             return False
 
         # Check for tokens.txt (essential)
         if not (model_dir / "tokens.txt").exists():
+            self._model_files_checked = False
             return False
 
         # Check for model.onnx or model.int8.onnx (both are valid)
         has_model = (model_dir / "model.onnx").exists() or (model_dir / "model.int8.onnx").exists()
 
+        # Cache the result
+        self._model_files_checked = has_model
         return has_model
 
     def load_model(self):
@@ -147,7 +162,7 @@ class SherpaBackend(BaseBackend):
             self._recognizer = sherpa_onnx.OfflineRecognizer.from_nemo_ctc(
                 model=str(model_file),
                 tokens=str(tokens_file),
-                num_threads=2,
+                num_threads=self.num_threads,
                 sample_rate=16000,
                 feature_dim=80,
                 decoding_method="greedy_search",
@@ -197,11 +212,17 @@ class SherpaBackend(BaseBackend):
             # Resample if necessary (Sherpa-ONNX expects 16kHz)
             if sample_rate != 16000:
                 try:
-                    import scipy.signal
-                    num_samples = int(len(audio) * 16000 / sample_rate)
-                    audio = scipy.signal.resample(audio, num_samples)
+                    # Use librosa if available (faster than scipy)
+                    import librosa
+                    audio = librosa.resample(audio, orig_sr=sample_rate, target_sr=16000)
                 except ImportError:
-                    pass
+                    # Fallback to scipy (slower)
+                    try:
+                        import scipy.signal
+                        num_samples = int(len(audio) * 16000 / sample_rate)
+                        audio = scipy.signal.resample(audio, num_samples)
+                    except ImportError:
+                        pass
 
             # Create audio stream from numpy array
             # Sherpa-ONNX expects float32 audio normalized to [-1, 1]
