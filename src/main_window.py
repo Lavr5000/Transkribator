@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QSystemTrayIcon, QMenu, QMessageBox,
     QApplication, QDialog, QScrollArea
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread, QPoint, QRectF
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread, QPoint, QRectF, QSize
 from PyQt6.QtGui import (
     QIcon, QPixmap, QFont, QAction, QColor,
     QPainter, QLinearGradient, QBrush, QPen, QMouseEvent,
@@ -31,102 +31,70 @@ except ImportError:
     CLIPBOARD_AVAILABLE = False
 
 
-# WhisperTyping-style gradient colors
+# Gradient colors
 GRADIENT_COLORS = {
-    'left': '#f97316',      # Orange
-    'middle': '#ec4899',    # Pink
-    'right': '#8b5cf6',     # Purple
+    'left': '#e85d04',
+    'middle': '#d63384',
+    'right': '#7c3aed',
 }
 
-# UI Colors
 COLORS = {
     'bg_dark': '#1a1a2e',
     'bg_medium': '#16213e',
     'bg_light': '#0f3460',
     'accent': '#ec4899',
-    'accent_hover': '#f472b6',
     'text_primary': '#ffffff',
     'text_secondary': '#a0a0a0',
-    'success': '#4ecca3',
-    'warning': '#ffc107',
+    'success': '#10b981',
     'border': '#2d2d44',
 }
 
-# Compact bar dimensions - reduced width
 COMPACT_HEIGHT = 52
-COMPACT_WIDTH = 340  # Reduced from 520
-ICON_SIZE = 18
+COMPACT_WIDTH = 340
 
 
-# Settings dialog stylesheet
 DIALOG_STYLESHEET = f"""
 QDialog {{
     background-color: {COLORS['bg_dark']};
     color: {COLORS['text_primary']};
-    border: 1px solid {COLORS['border']};
     border-radius: 12px;
 }}
-
 QLabel {{
     color: {COLORS['text_primary']};
     font-size: 13px;
 }}
-
 QPushButton {{
     background-color: {COLORS['bg_light']};
     color: {COLORS['text_primary']};
     border: 1px solid {COLORS['border']};
     border-radius: 8px;
     padding: 8px 16px;
-    font-size: 13px;
 }}
-
 QPushButton:hover {{
     background-color: {COLORS['accent']};
-    border-color: {COLORS['accent']};
 }}
-
 QTextEdit {{
     background-color: {COLORS['bg_medium']};
     color: {COLORS['text_primary']};
     border: 1px solid {COLORS['border']};
     border-radius: 8px;
     padding: 10px;
-    font-size: 14px;
 }}
-
 QComboBox {{
     background-color: {COLORS['bg_medium']};
     color: {COLORS['text_primary']};
     border: 1px solid {COLORS['border']};
     border-radius: 6px;
-    padding: 8px 12px;
-    min-width: 150px;
+    padding: 8px;
 }}
-
-QComboBox:hover {{
-    border-color: {COLORS['accent']};
-}}
-
-QComboBox::drop-down {{
-    subcontrol-origin: padding;
-    subcontrol-position: right center;
-    width: 20px;
-    border-left: 1px solid {COLORS['border']};
-}}
-
 QComboBox QAbstractItemView {{
     background-color: {COLORS['bg_medium']};
     color: {COLORS['text_primary']};
     selection-background-color: {COLORS['accent']};
-    border: 1px solid {COLORS['border']};
 }}
-
 QCheckBox {{
     color: {COLORS['text_primary']};
-    spacing: 8px;
 }}
-
 QCheckBox::indicator {{
     width: 18px;
     height: 18px;
@@ -134,62 +102,37 @@ QCheckBox::indicator {{
     border: 1px solid {COLORS['border']};
     background-color: {COLORS['bg_medium']};
 }}
-
 QCheckBox::indicator:checked {{
     background-color: {COLORS['accent']};
-    border-color: {COLORS['accent']};
 }}
-
 QGroupBox {{
     color: {COLORS['text_primary']};
     border: 1px solid {COLORS['border']};
     border-radius: 8px;
     margin-top: 12px;
     padding-top: 10px;
-    font-weight: bold;
 }}
-
-QGroupBox::title {{
-    subcontrol-origin: margin;
-    left: 10px;
-    padding: 0 5px;
-}}
-
 QTabWidget::pane {{
     border: 1px solid {COLORS['border']};
     border-radius: 8px;
     background-color: {COLORS['bg_dark']};
 }}
-
 QTabBar::tab {{
     background-color: {COLORS['bg_medium']};
     color: {COLORS['text_secondary']};
-    border: 1px solid {COLORS['border']};
-    border-bottom: none;
     border-top-left-radius: 6px;
     border-top-right-radius: 6px;
     padding: 8px 16px;
-    margin-right: 2px;
 }}
-
 QTabBar::tab:selected {{
     background-color: {COLORS['bg_dark']};
     color: {COLORS['text_primary']};
-    border-bottom: 2px solid {COLORS['accent']};
-}}
-
-QScrollArea {{
-    border: none;
-    background-color: transparent;
 }}
 """
 
 
 class TranscriptionThread(QThread):
-    """Thread for running transcription."""
-
     finished = pyqtSignal(str, float)
-    progress = pyqtSignal(str)
     error = pyqtSignal(str)
 
     def __init__(self, transcriber, audio, sample_rate: int):
@@ -206,59 +149,207 @@ class TranscriptionThread(QThread):
             self.error.emit(str(e))
 
 
-class WaveformWidget(QWidget):
-    """Widget showing audio waveform visualization."""
+class RecordButton(QPushButton):
+    """Stylish central record button with custom painting."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.audio_level = 0.0
-        self.wave_bars: List[float] = [0.1] * 9  # 9 bars for waveform
-        self.setFixedSize(60, 30)
+        self._recording = False
+        self._audio_level = 0.0
+        self._wave_phase = 0.0
+        self.setFixedSize(36, 36)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        # Animation timer for wave effect
+        self._anim_timer = QTimer()
+        self._anim_timer.timeout.connect(self._animate)
+
+    def set_recording(self, recording: bool):
+        self._recording = recording
+        if recording:
+            self._anim_timer.start(50)
+        else:
+            self._anim_timer.stop()
+            self._audio_level = 0.0
+        self.update()
 
     def set_audio_level(self, level: float):
-        """Update audio level and shift wave bars."""
-        self.audio_level = min(1.0, level)
-        # Shift bars left and add new level
-        self.wave_bars = self.wave_bars[1:] + [max(0.1, min(1.0, level * 3))]
+        self._audio_level = min(1.0, level * 2)
+        self.update()
+
+    def _animate(self):
+        self._wave_phase += 0.3
         self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Draw waveform bars
-        bar_width = 4
-        spacing = 3
-        total_width = len(self.wave_bars) * (bar_width + spacing) - spacing
-        start_x = (self.width() - total_width) // 2
-        center_y = self.height() // 2
+        center_x = self.width() / 2
+        center_y = self.height() / 2
 
-        for i, level in enumerate(self.wave_bars):
-            x = start_x + i * (bar_width + spacing)
-            bar_height = max(4, int(level * 20))
+        if self._recording:
+            # Recording state - draw animated sound waves
+            base_alpha = 180
 
-            # Draw bar centered vertically
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(255, 255, 255, 200))
+            # Draw pulsing circles based on audio level
+            for i in range(3):
+                import math
+                phase_offset = i * 0.8
+                pulse = (math.sin(self._wave_phase + phase_offset) + 1) / 2
+                radius = 8 + i * 5 + self._audio_level * 6 * pulse
+                alpha = int(base_alpha * (1 - i * 0.3) * (0.5 + self._audio_level * 0.5))
+
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor(255, 255, 255, alpha))
+                painter.drawEllipse(
+                    QRectF(center_x - radius, center_y - radius, radius * 2, radius * 2)
+                )
+
+            # Draw center circle (stop button)
+            painter.setBrush(QColor(255, 255, 255, 240))
             painter.drawRoundedRect(
-                x, center_y - bar_height // 2,
-                bar_width, bar_height,
-                2, 2
+                QRectF(center_x - 6, center_y - 6, 12, 12), 2, 2
+            )
+        else:
+            # Idle state - draw microphone icon
+            # Outer glow on hover
+            if self.underMouse():
+                painter.setBrush(QColor(255, 255, 255, 30))
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.drawEllipse(QRectF(2, 2, 32, 32))
+
+            # Mic body
+            painter.setPen(QPen(QColor(255, 255, 255, 220), 2))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+
+            # Mic head (rounded rect)
+            mic_rect = QRectF(center_x - 5, center_y - 10, 10, 14)
+            painter.drawRoundedRect(mic_rect, 5, 5)
+
+            # Mic stand curve
+            path = QPainterPath()
+            path.moveTo(center_x - 8, center_y + 2)
+            path.quadTo(center_x - 8, center_y + 8, center_x, center_y + 8)
+            path.quadTo(center_x + 8, center_y + 8, center_x + 8, center_y + 2)
+            painter.drawPath(path)
+
+            # Mic stand
+            painter.drawLine(
+                QPoint(int(center_x), int(center_y + 8)),
+                QPoint(int(center_x), int(center_y + 12))
+            )
+            painter.drawLine(
+                QPoint(int(center_x - 5), int(center_y + 12)),
+                QPoint(int(center_x + 5), int(center_y + 12))
             )
 
 
-class GradientWidget(QWidget):
-    """Widget with gradient background and hover detection."""
+class MiniButton(QPushButton):
+    """Tiny corner button that appears on hover."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setAutoFillBackground(False)
-        self.setMouseTracking(True)
-        self._hovered = False
+        self.setFixedSize(18, 18)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._opacity = 0.0
 
-    def set_hovered(self, hovered: bool):
-        self._hovered = hovered
+    def set_opacity(self, opacity: float):
+        self._opacity = opacity
         self.update()
+
+    def paintEvent(self, event):
+        if self._opacity < 0.05:
+            return
+        # Subclasses implement actual drawing
+        pass
+
+
+class CopyButton(MiniButton):
+    def paintEvent(self, event):
+        if self._opacity < 0.05:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        alpha = int(255 * self._opacity)
+        hover_boost = 60 if self.underMouse() else 0
+
+        painter.setPen(QPen(QColor(255, 255, 255, min(255, alpha + hover_boost)), 1.5))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+
+        # Draw two overlapping rectangles (copy icon)
+        painter.drawRoundedRect(QRectF(3, 5, 8, 10), 1, 1)
+        painter.drawRoundedRect(QRectF(7, 3, 8, 10), 1, 1)
+
+
+class HistoryButton(MiniButton):
+    def paintEvent(self, event):
+        if self._opacity < 0.05:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        alpha = int(255 * self._opacity)
+        hover_boost = 60 if self.underMouse() else 0
+
+        painter.setPen(QPen(QColor(255, 255, 255, min(255, alpha + hover_boost)), 1.5))
+
+        # Draw clock icon
+        painter.drawEllipse(QRectF(3, 3, 12, 12))
+        painter.drawLine(QPoint(9, 5), QPoint(9, 9))
+        painter.drawLine(QPoint(9, 9), QPoint(12, 9))
+
+
+class SettingsButton(MiniButton):
+    def paintEvent(self, event):
+        if self._opacity < 0.05:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        alpha = int(255 * self._opacity)
+        hover_boost = 60 if self.underMouse() else 0
+
+        painter.setPen(QPen(QColor(255, 255, 255, min(255, alpha + hover_boost)), 1.5))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+
+        # Draw gear icon (simplified)
+        painter.drawEllipse(QRectF(5, 5, 8, 8))
+
+        # Gear teeth
+        import math
+        for i in range(6):
+            angle = i * math.pi / 3
+            x1 = 9 + 4 * math.cos(angle)
+            y1 = 9 + 4 * math.sin(angle)
+            x2 = 9 + 6 * math.cos(angle)
+            y2 = 9 + 6 * math.sin(angle)
+            painter.drawLine(QPoint(int(x1), int(y1)), QPoint(int(x2), int(y2)))
+
+
+class CloseButton(MiniButton):
+    def paintEvent(self, event):
+        if self._opacity < 0.05:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        alpha = int(255 * self._opacity)
+        hover_boost = 60 if self.underMouse() else 0
+        color = QColor(255, 100, 100, min(255, alpha + hover_boost)) if self.underMouse() else QColor(255, 255, 255, alpha)
+
+        painter.setPen(QPen(color, 1.5))
+
+        # Draw X
+        painter.drawLine(QPoint(5, 5), QPoint(13, 13))
+        painter.drawLine(QPoint(13, 5), QPoint(5, 13))
+
+
+class GradientWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMouseTracking(True)
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -274,61 +365,7 @@ class GradientWidget(QWidget):
         painter.drawRoundedRect(self.rect(), 12, 12)
 
 
-class IconButton(QPushButton):
-    """Transparent icon button that appears on hover."""
-
-    def __init__(self, icon_char: str, tooltip: str = "", parent=None):
-        super().__init__(parent)
-        self.icon_char = icon_char
-        self.setToolTip(tooltip)
-        self.setFixedSize(28, 28)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._visible_mode = False
-        self._update_style()
-        self.setText(icon_char)
-
-    def set_visible_mode(self, visible: bool):
-        """Set whether button should be visible or semi-transparent."""
-        self._visible_mode = visible
-        self._update_style()
-
-    def _update_style(self):
-        if self._visible_mode:
-            self.setStyleSheet("""
-                QPushButton {
-                    background-color: rgba(255, 255, 255, 0.15);
-                    border: none;
-                    border-radius: 14px;
-                    color: rgba(255, 255, 255, 0.9);
-                    font-size: 14px;
-                }
-                QPushButton:hover {
-                    background-color: rgba(255, 255, 255, 0.25);
-                    color: white;
-                }
-                QPushButton:pressed {
-                    background-color: rgba(255, 255, 255, 0.35);
-                }
-            """)
-        else:
-            self.setStyleSheet("""
-                QPushButton {
-                    background-color: transparent;
-                    border: none;
-                    color: rgba(255, 255, 255, 0.0);
-                    font-size: 14px;
-                }
-                QPushButton:hover {
-                    background-color: rgba(255, 255, 255, 0.15);
-                    border-radius: 14px;
-                    color: rgba(255, 255, 255, 0.9);
-                }
-            """)
-
-
 class SettingsDialog(QDialog):
-    """Settings and history dialog."""
-
     def __init__(self, parent=None, config=None, history_manager=None):
         super().__init__(parent)
         self.config = config
@@ -345,34 +382,30 @@ class SettingsDialog(QDialog):
         layout.setContentsMargins(15, 15, 15, 15)
         layout.setSpacing(10)
 
-        # Header with close button - VISIBLE
         header = QHBoxLayout()
         title = QLabel("Настройки")
-        title.setStyleSheet("font-size: 16px; font-weight: bold; color: white;")
+        title.setStyleSheet("font-size: 16px; font-weight: bold;")
         header.addWidget(title)
         header.addStretch()
 
         close_btn = QPushButton("✕")
-        close_btn.setFixedSize(32, 32)
+        close_btn.setFixedSize(28, 28)
         close_btn.setStyleSheet("""
             QPushButton {
-                background-color: rgba(255, 255, 255, 0.1);
-                border: 1px solid rgba(255, 255, 255, 0.3);
-                border-radius: 16px;
+                background: rgba(255,255,255,0.1);
+                border: 1px solid rgba(255,255,255,0.3);
+                border-radius: 14px;
                 color: white;
-                font-size: 16px;
-                font-weight: bold;
+                font-size: 14px;
             }
             QPushButton:hover {
-                background-color: rgba(233, 69, 96, 0.8);
-                border-color: #e94560;
+                background: #e94560;
             }
         """)
         close_btn.clicked.connect(self.close)
         header.addWidget(close_btn)
         layout.addLayout(header)
 
-        # Tabs
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
 
@@ -385,8 +418,7 @@ class SettingsDialog(QDialog):
         layout = QVBoxLayout(tab)
 
         self.text_edit = QTextEdit()
-        self.text_edit.setPlaceholderText("Транскрибированный текст появится здесь...")
-        self.text_edit.setMinimumHeight(200)
+        self.text_edit.setPlaceholderText("Транскрибированный текст...")
         layout.addWidget(self.text_edit)
 
         self.status_label = QLabel("Готово")
@@ -394,13 +426,9 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.status_label)
 
         btn_layout = QHBoxLayout()
-
         self.copy_btn = QPushButton("Копировать")
         self.copy_btn.clicked.connect(self._copy_text)
         btn_layout.addWidget(self.copy_btn)
-
-        self.paste_btn = QPushButton("Вставить")
-        btn_layout.addWidget(self.paste_btn)
 
         self.clear_btn = QPushButton("Очистить")
         self.clear_btn.clicked.connect(lambda: self.text_edit.clear())
@@ -415,22 +443,20 @@ class SettingsDialog(QDialog):
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll_content = QWidget()
-        scroll_layout = QVBoxLayout(scroll_content)
+        scroll.setStyleSheet("QScrollArea { border: none; }")
+        content = QWidget()
+        scroll_layout = QVBoxLayout(content)
 
-        # Backend
-        backend_group = QGroupBox("Движок распознавания")
+        backend_group = QGroupBox("Движок")
         backend_layout = QVBoxLayout(backend_group)
         self.backend_combo = QComboBox()
-        for backend_id, backend_name in BACKENDS.items():
-            self.backend_combo.addItem(backend_name, backend_id)
+        for bid, bname in BACKENDS.items():
+            self.backend_combo.addItem(bname, bid)
         if self.config:
-            idx = list(BACKENDS.keys()).index(self.config.backend)
-            self.backend_combo.setCurrentIndex(idx)
+            self.backend_combo.setCurrentIndex(list(BACKENDS.keys()).index(self.config.backend))
         backend_layout.addWidget(self.backend_combo)
         scroll_layout.addWidget(backend_group)
 
-        # Model
         model_group = QGroupBox("Модель")
         model_layout = QVBoxLayout(model_group)
         self.model_combo = QComboBox()
@@ -438,47 +464,38 @@ class SettingsDialog(QDialog):
         model_layout.addWidget(self.model_combo)
         scroll_layout.addWidget(model_group)
 
-        # Language
         lang_group = QGroupBox("Язык")
         lang_layout = QVBoxLayout(lang_group)
         self.lang_combo = QComboBox()
-        for lang_id, lang_name in LANGUAGES.items():
-            self.lang_combo.addItem(lang_name, lang_id)
-        if self.config:
-            lang_keys = list(LANGUAGES.keys())
-            if self.config.language in lang_keys:
-                self.lang_combo.setCurrentIndex(lang_keys.index(self.config.language))
+        for lid, lname in LANGUAGES.items():
+            self.lang_combo.addItem(lname, lid)
+        if self.config and self.config.language in LANGUAGES:
+            self.lang_combo.setCurrentIndex(list(LANGUAGES.keys()).index(self.config.language))
         lang_layout.addWidget(self.lang_combo)
         scroll_layout.addWidget(lang_group)
 
-        # Behavior
         behavior_group = QGroupBox("Поведение")
         behavior_layout = QVBoxLayout(behavior_group)
 
-        self.auto_copy_cb = QCheckBox("Авто-копирование в буфер")
+        self.auto_copy_cb = QCheckBox("Авто-копирование")
+        self.auto_paste_cb = QCheckBox("Авто-вставка")
+        self.always_top_cb = QCheckBox("Поверх окон")
+        self.post_process_cb = QCheckBox("Пост-обработка")
+
         if self.config:
             self.auto_copy_cb.setChecked(self.config.auto_copy)
-        behavior_layout.addWidget(self.auto_copy_cb)
-
-        self.auto_paste_cb = QCheckBox("Авто-вставка после транскрибации")
-        if self.config:
             self.auto_paste_cb.setChecked(self.config.auto_paste)
-        behavior_layout.addWidget(self.auto_paste_cb)
-
-        self.always_top_cb = QCheckBox("Поверх всех окон")
-        if self.config:
             self.always_top_cb.setChecked(self.config.always_on_top)
-        behavior_layout.addWidget(self.always_top_cb)
-
-        self.post_process_cb = QCheckBox("Пост-обработка текста")
-        if self.config:
             self.post_process_cb.setChecked(self.config.enable_post_processing)
-        behavior_layout.addWidget(self.post_process_cb)
 
+        behavior_layout.addWidget(self.auto_copy_cb)
+        behavior_layout.addWidget(self.auto_paste_cb)
+        behavior_layout.addWidget(self.always_top_cb)
+        behavior_layout.addWidget(self.post_process_cb)
         scroll_layout.addWidget(behavior_group)
         scroll_layout.addStretch()
 
-        scroll.setWidget(scroll_content)
+        scroll.setWidget(content)
         layout.addWidget(scroll)
         self.tabs.addTab(tab, "Настройки")
 
@@ -486,33 +503,28 @@ class SettingsDialog(QDialog):
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
-        stats_group = QGroupBox("Статистика")
-        stats_layout = QVBoxLayout(stats_group)
-
         if self.config:
-            self.stats_words = QLabel(f"Всего слов: {self.config.total_words:,}")
-            stats_layout.addWidget(self.stats_words)
+            stats = QGroupBox("Статистика")
+            stats_layout = QVBoxLayout(stats)
+            self.stats_words = QLabel(f"Слов: {self.config.total_words:,}")
             self.stats_recordings = QLabel(f"Записей: {self.config.total_recordings:,}")
+            self.stats_saved = QLabel(f"Время: {self.config.total_seconds_saved/60:.1f} мин")
+            stats_layout.addWidget(self.stats_words)
             stats_layout.addWidget(self.stats_recordings)
-            saved_mins = self.config.total_seconds_saved / 60
-            self.stats_saved = QLabel(f"Сохранено времени: {saved_mins:.1f} мин")
             stats_layout.addWidget(self.stats_saved)
+            layout.addWidget(stats)
 
-        layout.addWidget(stats_group)
-
-        history_group = QGroupBox("История (последние 50)")
+        history_group = QGroupBox("История")
         history_layout = QVBoxLayout(history_group)
-
         self.history_text = QTextEdit()
         self.history_text.setReadOnly(True)
-        self.history_text.setMinimumHeight(200)
         history_layout.addWidget(self.history_text)
 
-        clear_btn = QPushButton("Очистить историю")
+        clear_btn = QPushButton("Очистить")
         clear_btn.clicked.connect(self._clear_history)
         history_layout.addWidget(clear_btn)
-
         layout.addWidget(history_group)
+
         self.tabs.addTab(tab, "История")
         self._update_history_display()
 
@@ -520,76 +532,54 @@ class SettingsDialog(QDialog):
         self.model_combo.clear()
         if not self.config:
             return
-        current_backend = self.backend_combo.currentData() if self.backend_combo.currentData() else self.config.backend
-        if current_backend == "whisper":
-            models = WHISPER_MODELS
-        elif current_backend == "sherpa":
-            models = SHERPA_MODELS
-        elif current_backend == "podlodka-turbo":
-            models = PODLODKA_MODELS
-        else:
-            models = {}
-        for model_id, model_name in models.items():
-            self.model_combo.addItem(model_name, model_id)
-        model_keys = list(models.keys())
-        if self.config.model_size in model_keys:
-            self.model_combo.setCurrentIndex(model_keys.index(self.config.model_size))
+        backend = self.backend_combo.currentData() or self.config.backend
+        models = {"whisper": WHISPER_MODELS, "sherpa": SHERPA_MODELS, "podlodka-turbo": PODLODKA_MODELS}.get(backend, {})
+        for mid, mname in models.items():
+            self.model_combo.addItem(mname, mid)
+        if self.config.model_size in models:
+            self.model_combo.setCurrentIndex(list(models.keys()).index(self.config.model_size))
 
     def _update_history_display(self):
         if not self.history_manager:
             return
         history = self.history_manager.get_history()
         if not history:
-            self.history_text.setPlainText("История пуста")
+            self.history_text.setPlainText("Пусто")
             return
         lines = []
-        for idx, entry in enumerate(history, 1):
-            lines.append(f"[{idx}] {entry.timestamp}")
-            lines.append(f"Модель: {entry.backend}/{entry.model}")
-            lines.append(f"Длительность: {entry.duration:.1f}с | Слов: {entry.word_count}")
-            lines.append(f"Текст:\n{entry.text}")
-            lines.append("-" * 60)
-            lines.append("")
+        for i, e in enumerate(history, 1):
+            lines.append(f"[{i}] {e.timestamp}\n{e.text}\n")
         self.history_text.setPlainText("\n".join(lines))
 
     def _clear_history(self):
         if self.history_manager:
-            reply = QMessageBox.question(
-                self, "Подтверждение", "Очистить историю?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-            if reply == QMessageBox.StandardButton.Yes:
-                self.history_manager.clear_history()
-                self._update_history_display()
+            self.history_manager.clear_history()
+            self._update_history_display()
 
     def _copy_text(self):
-        text = self.text_edit.toPlainText()
-        if text and CLIPBOARD_AVAILABLE:
+        if CLIPBOARD_AVAILABLE:
             try:
-                pyperclip.copy(text)
+                pyperclip.copy(self.text_edit.toPlainText())
                 self.status_label.setText("Скопировано!")
             except:
                 pass
 
     def update_stats_display(self):
         if self.config:
-            self.stats_words.setText(f"Всего слов: {self.config.total_words:,}")
+            self.stats_words.setText(f"Слов: {self.config.total_words:,}")
             self.stats_recordings.setText(f"Записей: {self.config.total_recordings:,}")
-            saved_mins = self.config.total_seconds_saved / 60
-            self.stats_saved.setText(f"Сохранено времени: {saved_mins:.1f} мин")
+            self.stats_saved.setText(f"Время: {self.config.total_seconds_saved/60:.1f} мин")
 
-    def mousePressEvent(self, event: QMouseEvent):
+    def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
 
-    def mouseMoveEvent(self, event: QMouseEvent):
-        if event.buttons() == Qt.MouseButton.LeftButton and self._drag_position:
+    def mouseMoveEvent(self, event):
+        if self._drag_position:
             self.move(event.globalPosition().toPoint() - self._drag_position)
 
 
 class MainWindow(QMainWindow):
-    """Compact main application window in WhisperTyping style."""
-
     status_update = pyqtSignal(str)
     audio_level_update = pyqtSignal(float)
 
@@ -597,50 +587,40 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         self.config = Config.load()
-
         self.recorder = AudioRecorder(
             sample_rate=self.config.sample_rate,
             channels=self.config.channels,
             on_level_update=self._on_audio_level
         )
-
         self.transcriber = Transcriber(
             backend=self.config.backend,
             model_size=self.config.model_size,
             device=self.config.device,
             compute_type=self.config.compute_type,
             language=self.config.language,
-            on_progress=self._on_transcriber_progress,
+            on_progress=self._on_progress,
             enable_post_processing=self.config.enable_post_processing
         )
-
         self.hotkey_manager = HotkeyManager(on_hotkey=self._on_hotkey)
         self.history_manager = HistoryManager(max_entries=50)
 
-        self._transcription_thread: Optional[TranscriptionThread] = None
-        self._recording_start_time: float = 0
-        self._drag_position = None
-        self._settings_dialog = None
-        self._is_recording = False
-        self._last_transcribed_text = ""
-
-        # Recording timer
-        self._recording_timer = QTimer()
-        self._recording_timer.timeout.connect(self._update_recording_time)
-        self._recording_seconds = 0
+        self._thread: Optional[TranscriptionThread] = None
+        self._rec_start = 0.0
+        self._drag_pos = None
+        self._settings = None
+        self._recording = False
+        self._last_text = ""
+        self._hover = False
 
         self._setup_ui()
         self._setup_tray()
         self._connect_signals()
-        self._register_hotkey()
-
-        QTimer.singleShot(1000, self._load_model_async)
+        self.hotkey_manager.register(self.config.hotkey)
+        QTimer.singleShot(1000, self._load_model)
 
     def _setup_ui(self):
-        """Setup the compact user interface."""
         self.setWindowTitle("ГолосТекст")
         self.setFixedSize(COMPACT_WIDTH, COMPACT_HEIGHT)
-
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.WindowStaysOnTopHint |
@@ -648,475 +628,281 @@ class MainWindow(QMainWindow):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
-        self.central_widget = GradientWidget()
-        self.central_widget.setMouseTracking(True)
-        self.setCentralWidget(self.central_widget)
+        self.central = GradientWidget()
+        self.central.setMouseTracking(True)
+        self.setCentralWidget(self.central)
 
-        layout = QHBoxLayout(self.central_widget)
-        layout.setContentsMargins(12, 8, 8, 8)
-        layout.setSpacing(6)
+        # Status label (left)
+        self.status_label = QLabel("Готово", self.central)
+        self.status_label.setStyleSheet("color: white; font-size: 13px; font-weight: 500;")
+        self.status_label.move(14, 17)
 
-        # Left side: Status label OR Waveform when recording
-        self.status_label = QLabel("Listening")
-        self.status_label.setStyleSheet("""
-            QLabel {
-                color: white;
-                font-size: 14px;
-                font-weight: bold;
-            }
-        """)
-        layout.addWidget(self.status_label)
-
-        # Waveform visualization (shown during recording)
-        self.waveform = WaveformWidget()
-        self.waveform.hide()
-        layout.addWidget(self.waveform)
-
-        # Timer label (shown during recording)
-        self.timer_label = QLabel("")
-        self.timer_label.setStyleSheet("""
-            QLabel {
-                color: white;
-                font-size: 13px;
-                font-weight: bold;
-            }
-        """)
+        # Timer label (near status, shown during recording)
+        self.timer_label = QLabel("", self.central)
+        self.timer_label.setStyleSheet("color: rgba(255,255,255,0.8); font-size: 12px;")
+        self.timer_label.move(80, 18)
         self.timer_label.hide()
-        layout.addWidget(self.timer_label)
 
-        layout.addStretch()
-
-        # Right side buttons container
-        self.buttons_container = QWidget()
-        self.buttons_container.setStyleSheet("background: transparent;")
-        buttons_layout = QHBoxLayout(self.buttons_container)
-        buttons_layout.setContentsMargins(0, 0, 0, 0)
-        buttons_layout.setSpacing(4)
-
-        # Copy button
-        self.copy_btn = IconButton("📋", "Копировать последний текст")
-        self.copy_btn.clicked.connect(self._copy_last_text)
-        buttons_layout.addWidget(self.copy_btn)
-
-        # History button
-        self.history_btn = IconButton("📜", "История транскрибаций")
-        self.history_btn.clicked.connect(self._show_history)
-        buttons_layout.addWidget(self.history_btn)
-
-        # Settings button
-        self.settings_btn = IconButton("⚙", "Настройки")
-        self.settings_btn.clicked.connect(self._show_settings)
-        buttons_layout.addWidget(self.settings_btn)
-
-        # Record/Stop button (microphone or stop)
-        self.record_btn = IconButton("🎤", "Начать/Остановить запись")
+        # Center record button
+        self.record_btn = RecordButton(self.central)
+        self.record_btn.move((COMPACT_WIDTH - 36) // 2, (COMPACT_HEIGHT - 36) // 2)
         self.record_btn.clicked.connect(self._toggle_recording)
-        buttons_layout.addWidget(self.record_btn)
 
-        # Close button - always somewhat visible
-        self.close_btn = IconButton("✕", "Закрыть")
-        self.close_btn.clicked.connect(self._quit_app)
-        self.close_btn.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                border: none;
-                color: rgba(255, 255, 255, 0.5);
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: rgba(255, 255, 255, 0.15);
-                border-radius: 14px;
-                color: white;
-            }
-        """)
-        buttons_layout.addWidget(self.close_btn)
+        # Corner buttons (top-right, small)
+        btn_y = 6
+        btn_spacing = 20
 
-        layout.addWidget(self.buttons_container)
+        self.close_btn = CloseButton(self.central)
+        self.close_btn.move(COMPACT_WIDTH - 24, btn_y)
+        self.close_btn.clicked.connect(self._quit)
 
-        # Start with buttons semi-hidden
-        self._set_buttons_visible(False)
+        self.settings_btn = SettingsButton(self.central)
+        self.settings_btn.move(COMPACT_WIDTH - 24 - btn_spacing, btn_y)
+        self.settings_btn.clicked.connect(self._show_settings)
 
-    def _set_buttons_visible(self, visible: bool):
-        """Set visibility mode for action buttons."""
-        for btn in [self.copy_btn, self.history_btn, self.settings_btn, self.record_btn]:
-            btn.set_visible_mode(visible)
+        self.history_btn = HistoryButton(self.central)
+        self.history_btn.move(COMPACT_WIDTH - 24 - btn_spacing * 2, btn_y)
+        self.history_btn.clicked.connect(self._show_history)
+
+        self.copy_btn = CopyButton(self.central)
+        self.copy_btn.move(COMPACT_WIDTH - 24 - btn_spacing * 3, btn_y)
+        self.copy_btn.clicked.connect(self._copy_last)
+
+        self._corner_btns = [self.copy_btn, self.history_btn, self.settings_btn, self.close_btn]
+        self._set_corner_opacity(0.0)
+
+        # Recording timer
+        self._rec_timer = QTimer()
+        self._rec_timer.timeout.connect(self._update_timer)
+
+    def _set_corner_opacity(self, opacity: float):
+        for btn in self._corner_btns:
+            btn.set_opacity(opacity)
 
     def enterEvent(self, event):
-        """Show buttons when mouse enters window."""
-        self._set_buttons_visible(True)
+        self._hover = True
+        self._set_corner_opacity(0.7)
         super().enterEvent(event)
 
     def leaveEvent(self, event):
-        """Hide buttons when mouse leaves window."""
-        self._set_buttons_visible(False)
+        self._hover = False
+        self._set_corner_opacity(0.0)
         super().leaveEvent(event)
 
     def _setup_tray(self):
-        """Setup system tray icon."""
-        self.tray_icon = QSystemTrayIcon(self)
+        self.tray = QSystemTrayIcon(self)
 
-        pixmap = QPixmap(32, 32)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        gradient = QLinearGradient(0, 0, 32, 0)
-        gradient.setColorAt(0.0, QColor(GRADIENT_COLORS['left']))
-        gradient.setColorAt(0.5, QColor(GRADIENT_COLORS['middle']))
-        gradient.setColorAt(1.0, QColor(GRADIENT_COLORS['right']))
-        painter.setBrush(QBrush(gradient))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(2, 2, 28, 28)
-        painter.end()
+        pix = QPixmap(32, 32)
+        pix.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pix)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        g = QLinearGradient(0, 0, 32, 0)
+        g.setColorAt(0, QColor(GRADIENT_COLORS['left']))
+        g.setColorAt(0.5, QColor(GRADIENT_COLORS['middle']))
+        g.setColorAt(1, QColor(GRADIENT_COLORS['right']))
+        p.setBrush(QBrush(g))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(2, 2, 28, 28)
+        p.end()
+        self.tray.setIcon(QIcon(pix))
 
-        self.tray_icon.setIcon(QIcon(pixmap))
-
-        tray_menu = QMenu()
-
-        show_action = QAction("Показать", self)
-        show_action.triggered.connect(self.show)
-        tray_menu.addAction(show_action)
-
-        settings_action = QAction("Настройки", self)
-        settings_action.triggered.connect(self._show_settings)
-        tray_menu.addAction(settings_action)
-
-        record_action = QAction("Начать запись", self)
-        record_action.triggered.connect(self._toggle_recording)
-        tray_menu.addAction(record_action)
-        self.tray_record_action = record_action
-
-        tray_menu.addSeparator()
-
-        quit_action = QAction("Выход", self)
-        quit_action.triggered.connect(self._quit_app)
-        tray_menu.addAction(quit_action)
-
-        self.tray_icon.setContextMenu(tray_menu)
-        self.tray_icon.activated.connect(self._on_tray_activated)
-        self.tray_icon.show()
+        menu = QMenu()
+        menu.addAction("Показать", self.show)
+        menu.addAction("Настройки", self._show_settings)
+        self.tray_rec = menu.addAction("Запись", self._toggle_recording)
+        menu.addSeparator()
+        menu.addAction("Выход", self._quit)
+        self.tray.setContextMenu(menu)
+        self.tray.activated.connect(self._tray_click)
+        self.tray.show()
 
     def _connect_signals(self):
-        """Connect signals."""
-        self.status_update.connect(self._update_status)
-        self.audio_level_update.connect(self._update_level)
+        self.status_update.connect(self._set_status)
+        self.audio_level_update.connect(self._set_level)
 
-    def _register_hotkey(self):
-        """Register the global hotkey."""
-        self.hotkey_manager.register(self.config.hotkey)
+    def _load_model(self):
+        threading.Thread(target=self.transcriber.load_model, daemon=True).start()
 
-    def _load_model_async(self):
-        """Load model in background."""
-        def load():
-            self.transcriber.load_model()
-        thread = threading.Thread(target=load, daemon=True)
-        thread.start()
+    def _on_audio_level(self, level):
+        self.audio_level_update.emit(min(1.0, level * 10))
 
-    def _on_audio_level(self, level: float):
-        """Handle audio level update."""
-        scaled = min(1.0, level * 10)
-        self.audio_level_update.emit(scaled)
-
-    def _on_transcriber_progress(self, message: str):
-        """Handle transcriber progress update."""
-        self.status_update.emit(message)
+    def _on_progress(self, msg):
+        self.status_update.emit(msg)
 
     def _on_hotkey(self):
-        """Handle hotkey press."""
         self._toggle_recording()
 
     def _toggle_recording(self):
-        """Toggle recording state."""
-        if self._is_recording:
-            self._stop_recording()
+        if self._recording:
+            self._stop()
         else:
-            self._start_recording()
+            self._start()
 
-    def _start_recording(self):
-        """Start audio recording."""
+    def _start(self):
         if self.recorder.start():
-            self._is_recording = True
-            self._recording_start_time = time.time()
-            self._recording_seconds = 0
-
-            # Update UI for recording state
-            self.status_label.setText("Listening")
-            self.waveform.show()
+            self._recording = True
+            self._rec_start = time.time()
+            self.status_label.setText("Слушаю")
+            self.timer_label.setText("0.0s")
             self.timer_label.show()
-            self.timer_label.setText("0,0s")
-            self.record_btn.setText("⏹")
-            self.record_btn.setToolTip("Остановить запись")
+            self.record_btn.set_recording(True)
+            self._rec_timer.start(100)
+            self.tray_rec.setText("Стоп")
 
-            # Start timer
-            self._recording_timer.start(100)  # Update every 100ms
-
-            self.tray_record_action.setText("Остановить запись")
-
-            # Update tray icon to green
-            pixmap = QPixmap(32, 32)
-            pixmap.fill(Qt.GlobalColor.transparent)
-            painter = QPainter(pixmap)
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-            painter.setBrush(QColor(COLORS['success']))
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawEllipse(2, 2, 28, 28)
-            painter.end()
-            self.tray_icon.setIcon(QIcon(pixmap))
-
-    def _stop_recording(self):
-        """Stop recording and transcribe."""
-        self._is_recording = False
-        self._recording_timer.stop()
-
+    def _stop(self):
+        self._recording = False
+        self._rec_timer.stop()
         audio = self.recorder.stop()
 
-        # Update UI for idle state
-        self.status_label.setText("Готово")
-        self.waveform.hide()
         self.timer_label.hide()
-        self.record_btn.setText("🎤")
-        self.record_btn.setToolTip("Начать запись")
+        self.record_btn.set_recording(False)
+        self.tray_rec.setText("Запись")
 
-        self.tray_record_action.setText("Начать запись")
-
-        # Reset tray icon
-        pixmap = QPixmap(32, 32)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        gradient = QLinearGradient(0, 0, 32, 0)
-        gradient.setColorAt(0.0, QColor(GRADIENT_COLORS['left']))
-        gradient.setColorAt(0.5, QColor(GRADIENT_COLORS['middle']))
-        gradient.setColorAt(1.0, QColor(GRADIENT_COLORS['right']))
-        painter.setBrush(QBrush(gradient))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(2, 2, 28, 28)
-        painter.end()
-        self.tray_icon.setIcon(QIcon(pixmap))
-
-        if audio is None or len(audio) == 0:
-            return
-
-        duration = self.recorder.get_duration(audio)
-        if duration < 0.5:
-            return
-
-        self.status_label.setText("Обработка...")
-
-        self._transcription_thread = TranscriptionThread(
-            self.transcriber, audio, self.config.sample_rate
-        )
-        self._transcription_thread.finished.connect(self._on_transcription_done)
-        self._transcription_thread.error.connect(self._on_transcription_error)
-        self._transcription_thread.start()
-
-    def _update_recording_time(self):
-        """Update the recording timer display."""
-        elapsed = time.time() - self._recording_start_time
-        self.timer_label.setText(f"{elapsed:.1f}s")
-
-    def _on_transcription_done(self, text: str, process_time: float):
-        """Handle transcription completion."""
-        if not text:
+        if audio is None or len(audio) == 0 or self.recorder.get_duration(audio) < 0.5:
             self.status_label.setText("Готово")
             return
 
-        self._last_transcribed_text = text
+        self.status_label.setText("Обработка...")
+        self._thread = TranscriptionThread(self.transcriber, audio, self.config.sample_rate)
+        self._thread.finished.connect(self._done)
+        self._thread.error.connect(self._error)
+        self._thread.start()
+
+    def _update_timer(self):
+        self.timer_label.setText(f"{time.time() - self._rec_start:.1f}s")
+
+    def _done(self, text, duration):
+        self._last_text = text
         self.status_label.setText("Готово")
 
-        if self._settings_dialog and self._settings_dialog.isVisible():
-            self._settings_dialog.text_edit.setPlainText(text)
-            self._settings_dialog.status_label.setText(f"Готово ({process_time:.1f}с)")
+        if self._settings and self._settings.isVisible():
+            self._settings.text_edit.setPlainText(text)
+            self._settings.status_label.setText(f"Готово ({duration:.1f}с)")
+            self._settings.update_stats_display()
+            self._settings._update_history_display()
 
-        word_count = len(text.split())
-        recording_duration = time.time() - self._recording_start_time
-        self.config.update_stats(word_count, recording_duration)
-
-        self.history_manager.add_entry(
-            text=text,
-            duration=process_time,
-            backend=self.config.backend,
-            model=self.config.model_size
-        )
-
-        if self._settings_dialog and self._settings_dialog.isVisible():
-            self._settings_dialog.update_stats_display()
-            self._settings_dialog._update_history_display()
+        self.config.update_stats(len(text.split()), time.time() - self._rec_start)
+        self.history_manager.add_entry(text, duration, self.config.backend, self.config.model_size)
 
         if self.config.auto_copy and CLIPBOARD_AVAILABLE:
             try:
                 pyperclip.copy(text)
             except:
                 pass
-
         if self.config.auto_paste:
-            QTimer.singleShot(100, lambda: self._auto_type_text(text))
+            QTimer.singleShot(100, lambda: self._type(text))
 
-    def _on_transcription_error(self, error: str):
-        """Handle transcription error."""
+    def _error(self, err):
         self.status_label.setText("Ошибка")
-        if self._settings_dialog and self._settings_dialog.isVisible():
-            self._settings_dialog.status_label.setText(f"Ошибка: {error}")
 
-    def _auto_type_text(self, text: str):
-        """Auto-type the transcribed text."""
+    def _type(self, text):
         try:
             type_text(text)
-        except Exception as e:
-            print(f"Auto-type failed: {e}")
+        except:
+            pass
 
-    def _update_status(self, message: str):
-        """Update status."""
-        if not self._is_recording:
-            self.status_label.setText(message)
-        if self._settings_dialog and self._settings_dialog.isVisible():
-            self._settings_dialog.status_label.setText(message)
+    def _set_status(self, msg):
+        if not self._recording:
+            self.status_label.setText(msg)
 
-    def _update_level(self, level: float):
-        """Update audio level visualization."""
-        if self._is_recording:
-            self.waveform.set_audio_level(level)
+    def _set_level(self, level):
+        if self._recording:
+            self.record_btn.set_audio_level(level)
 
-    def _copy_last_text(self):
-        """Copy last transcribed text to clipboard."""
-        if self._last_transcribed_text and CLIPBOARD_AVAILABLE:
+    def _copy_last(self):
+        if self._last_text and CLIPBOARD_AVAILABLE:
             try:
-                pyperclip.copy(self._last_transcribed_text)
+                pyperclip.copy(self._last_text)
                 self.status_label.setText("Скопировано!")
-                QTimer.singleShot(2000, lambda: self.status_label.setText("Готово") if not self._is_recording else None)
+                QTimer.singleShot(1500, lambda: self.status_label.setText("Готово") if not self._recording else None)
             except:
                 pass
 
     def _show_history(self):
-        """Show history in settings dialog."""
         self._show_settings()
-        if self._settings_dialog:
-            self._settings_dialog.tabs.setCurrentIndex(2)  # History tab
+        if self._settings:
+            self._settings.tabs.setCurrentIndex(2)
 
     def _show_settings(self):
-        """Show settings dialog."""
-        if self._settings_dialog is None:
-            self._settings_dialog = SettingsDialog(
-                self, config=self.config, history_manager=self.history_manager
-            )
-            self._settings_dialog.backend_combo.currentIndexChanged.connect(self._on_backend_changed)
-            self._settings_dialog.model_combo.currentIndexChanged.connect(self._on_model_changed)
-            self._settings_dialog.lang_combo.currentIndexChanged.connect(self._on_language_changed)
-            self._settings_dialog.auto_copy_cb.toggled.connect(self._on_auto_copy_changed)
-            self._settings_dialog.auto_paste_cb.toggled.connect(self._on_auto_paste_changed)
-            self._settings_dialog.always_top_cb.toggled.connect(self._on_always_top_changed)
-            self._settings_dialog.post_process_cb.toggled.connect(self._on_post_process_changed)
-            self._settings_dialog.paste_btn.clicked.connect(self._paste_from_dialog)
+        if not self._settings:
+            self._settings = SettingsDialog(self, self.config, self.history_manager)
+            self._settings.backend_combo.currentIndexChanged.connect(self._backend_changed)
+            self._settings.model_combo.currentIndexChanged.connect(self._model_changed)
+            self._settings.lang_combo.currentIndexChanged.connect(self._lang_changed)
+            self._settings.auto_copy_cb.toggled.connect(lambda c: setattr(self.config, 'auto_copy', c) or self.config.save())
+            self._settings.auto_paste_cb.toggled.connect(lambda c: setattr(self.config, 'auto_paste', c) or self.config.save())
+            self._settings.always_top_cb.toggled.connect(self._top_changed)
+            self._settings.post_process_cb.toggled.connect(self._post_changed)
 
-        pos = self.pos()
-        self._settings_dialog.move(pos.x(), pos.y() + self.height() + 10)
-        self._settings_dialog.show()
-        self._settings_dialog.raise_()
+        self._settings.move(self.pos().x(), self.pos().y() + self.height() + 10)
+        self._settings.show()
+        self._settings.raise_()
 
-    def _paste_from_dialog(self):
-        """Paste text from dialog."""
-        if self._settings_dialog:
-            text = self._settings_dialog.text_edit.toPlainText()
-            if text:
-                self._auto_type_text(text)
-
-    def _on_backend_changed(self, index: int):
-        if not self._settings_dialog:
-            return
-        backend_id = self._settings_dialog.backend_combo.currentData()
-        if backend_id != self.config.backend:
-            self.config.backend = backend_id
+    def _backend_changed(self):
+        bid = self._settings.backend_combo.currentData()
+        if bid != self.config.backend:
+            self.config.backend = bid
+            self._settings._update_model_options()
+            default = {"whisper": "base", "sherpa": "giga-am-v2-ru", "podlodka-turbo": "podlodka-turbo"}.get(bid, "base")
+            self.config.model_size = default
             self.config.save()
-            self._settings_dialog._update_model_options()
-            if backend_id == "whisper":
-                default_model = "base"
-            elif backend_id == "sherpa":
-                default_model = "giga-am-v2-ru"
-            elif backend_id == "podlodka-turbo":
-                default_model = "podlodka-turbo"
-            else:
-                default_model = "base"
-            self.config.model_size = default_model
+            self.transcriber.switch_backend(bid, default)
+
+    def _model_changed(self):
+        mid = self._settings.model_combo.currentData()
+        if mid and mid != self.config.model_size:
+            self.config.model_size = mid
             self.config.save()
-            self.transcriber.switch_backend(backend_id, default_model)
+            self.transcriber.switch_backend(self.config.backend, mid)
 
-    def _on_model_changed(self, index: int):
-        if not self._settings_dialog:
-            return
-        model_id = self._settings_dialog.model_combo.currentData()
-        if model_id and model_id != self.config.model_size:
-            self.config.model_size = model_id
-            self.config.save()
-            current_backend = self._settings_dialog.backend_combo.currentData()
-            self.transcriber.switch_backend(current_backend, model_id)
-
-    def _on_language_changed(self, index: int):
-        if not self._settings_dialog:
-            return
-        lang_id = self._settings_dialog.lang_combo.currentData()
-        self.config.language = lang_id
+    def _lang_changed(self):
+        lid = self._settings.lang_combo.currentData()
+        self.config.language = lid
         self.config.save()
-        self.transcriber.language = lang_id if lang_id != "auto" else None
+        self.transcriber.language = lid if lid != "auto" else None
 
-    def _on_auto_copy_changed(self, checked: bool):
-        self.config.auto_copy = checked
-        self.config.save()
-
-    def _on_auto_paste_changed(self, checked: bool):
-        self.config.auto_paste = checked
-        self.config.save()
-
-    def _on_always_top_changed(self, checked: bool):
+    def _top_changed(self, checked):
         self.config.always_on_top = checked
         self.config.save()
+        flags = self.windowFlags()
         if checked:
-            self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+            flags |= Qt.WindowType.WindowStaysOnTopHint
         else:
-            self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowStaysOnTopHint)
+            flags &= ~Qt.WindowType.WindowStaysOnTopHint
+        self.setWindowFlags(flags)
         self.show()
 
-    def _on_post_process_changed(self, checked: bool):
+    def _post_changed(self, checked):
         self.config.enable_post_processing = checked
         self.config.save()
         self.transcriber.enable_post_processing = checked
-        if hasattr(self.transcriber, 'text_processor'):
-            self.transcriber.text_processor.enable_corrections = checked
 
-    def _on_tray_activated(self, reason):
+    def _tray_click(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
-            if self.isVisible():
-                self.hide()
-            else:
-                self.show()
-                self.activateWindow()
+            self.show() if not self.isVisible() else self.hide()
 
-    def mousePressEvent(self, event: QMouseEvent):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            event.accept()
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = e.globalPosition().toPoint() - self.frameGeometry().topLeft()
 
-    def mouseMoveEvent(self, event: QMouseEvent):
-        if event.buttons() == Qt.MouseButton.LeftButton and self._drag_position:
-            self.move(event.globalPosition().toPoint() - self._drag_position)
-            event.accept()
+    def mouseMoveEvent(self, e):
+        if self._drag_pos:
+            self.move(e.globalPosition().toPoint() - self._drag_pos)
 
-    def closeEvent(self, event):
-        event.ignore()
+    def closeEvent(self, e):
+        e.ignore()
         self.hide()
 
-    def _quit_app(self):
+    def _quit(self):
         self.hotkey_manager.unregister()
-        self.tray_icon.hide()
+        self.tray.hide()
         self.config.save()
         QApplication.quit()
 
 
 def run():
-    """Run the application."""
     app = QApplication(sys.argv)
     app.setApplicationName("ГолосТекст")
     app.setQuitOnLastWindowClosed(False)
-
-    window = MainWindow()
-    window.show()
-
+    MainWindow().show()
     sys.exit(app.exec())
