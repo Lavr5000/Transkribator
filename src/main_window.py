@@ -143,9 +143,21 @@ class TranscriptionThread(QThread):
 
     def run(self):
         try:
+            with open("debug.log", "a") as f:
+                f.write(f"[DEBUG] TranscriptionThread started. Audio shape: {self.audio.shape}, Sample rate: {self.sample_rate}\n")
+
             text, duration = self.transcriber.transcribe(self.audio, self.sample_rate)
+
+            with open("debug.log", "a") as f:
+                f.write(f"[DEBUG] Transcription result. Text length: {len(text)}, Duration: {duration}\n")
+
             self.finished.emit(text, duration)
         except Exception as e:
+            with open("debug.log", "a") as f:
+                f.write(f"[ERROR] TranscriptionThread exception: {e}\n")
+            import traceback
+            with open("debug.log", "a") as f:
+                f.write(f"[ERROR] Traceback: {traceback.format_exc()}\n")
             self.error.emit(str(e))
 
 
@@ -640,7 +652,7 @@ class MainWindow(QMainWindow):
         # Timer label (near status, shown during recording)
         self.timer_label = QLabel("", self.central)
         self.timer_label.setStyleSheet("color: rgba(255,255,255,0.8); font-size: 12px;")
-        self.timer_label.move(80, 18)
+        self.timer_label.move(95, 18)
         self.timer_label.hide()
 
         # Center record button
@@ -660,15 +672,11 @@ class MainWindow(QMainWindow):
         self.settings_btn.move(COMPACT_WIDTH - 24 - btn_spacing, btn_y)
         self.settings_btn.clicked.connect(self._show_settings)
 
-        self.history_btn = HistoryButton(self.central)
-        self.history_btn.move(COMPACT_WIDTH - 24 - btn_spacing * 2, btn_y)
-        self.history_btn.clicked.connect(self._show_history)
-
         self.copy_btn = CopyButton(self.central)
-        self.copy_btn.move(COMPACT_WIDTH - 24 - btn_spacing * 3, btn_y)
+        self.copy_btn.move(COMPACT_WIDTH - 24 - btn_spacing * 2, btn_y)
         self.copy_btn.clicked.connect(self._copy_last)
 
-        self._corner_btns = [self.copy_btn, self.history_btn, self.settings_btn, self.close_btn]
+        self._corner_btns = [self.copy_btn, self.settings_btn, self.close_btn]
         self._set_corner_opacity(0.0)
 
         # Recording timer
@@ -730,16 +738,25 @@ class MainWindow(QMainWindow):
         self.status_update.emit(msg)
 
     def _on_hotkey(self):
+        with open("debug.log", "a") as f:
+            f.write("[DEBUG] Hotkey pressed!\n")
         self._toggle_recording()
 
     def _toggle_recording(self):
+        with open("debug.log", "a") as f:
+            f.write(f"[DEBUG] Toggle recording. Current state: {self._recording}\n")
         if self._recording:
             self._stop()
         else:
             self._start()
 
     def _start(self):
-        if self.recorder.start():
+        with open("debug.log", "a") as f:
+            f.write("[DEBUG] Starting recording...\n")
+        success = self.recorder.start()
+        with open("debug.log", "a") as f:
+            f.write(f"[DEBUG] Recorder start result: {success}\n")
+        if success:
             self._recording = True
             self._rec_start = time.time()
             self.status_label.setText("Слушаю")
@@ -750,6 +767,9 @@ class MainWindow(QMainWindow):
             self.tray_rec.setText("Стоп")
 
     def _stop(self):
+        with open("debug.log", "a") as f:
+            f.write("[DEBUG] Stopping recording...\n")
+
         self._recording = False
         self._rec_timer.stop()
         audio = self.recorder.stop()
@@ -759,8 +779,14 @@ class MainWindow(QMainWindow):
         self.tray_rec.setText("Запись")
 
         if audio is None or len(audio) == 0 or self.recorder.get_duration(audio) < 0.5:
+            with open("debug.log", "a") as f:
+                f.write(f"[DEBUG] Audio too short or empty: {audio is None}, len={len(audio) if audio is not None else 0}\n")
             self.status_label.setText("Готово")
             return
+
+        duration = self.recorder.get_duration(audio)
+        with open("debug.log", "a") as f:
+            f.write(f"[DEBUG] Starting transcription. Audio duration: {duration:.2f}s, samples: {len(audio)}\n")
 
         self.status_label.setText("Обработка...")
         self._thread = TranscriptionThread(self.transcriber, audio, self.config.sample_rate)
@@ -772,6 +798,9 @@ class MainWindow(QMainWindow):
         self.timer_label.setText(f"{time.time() - self._rec_start:.1f}s")
 
     def _done(self, text, duration):
+        with open("debug.log", "a") as f:
+            f.write(f"[DEBUG] Transcription done! Text: '{text[:100]}...', Duration: {duration}s\n")
+
         self._last_text = text
         self.status_label.setText("Готово")
 
@@ -787,12 +816,17 @@ class MainWindow(QMainWindow):
         if self.config.auto_copy and CLIPBOARD_AVAILABLE:
             try:
                 pyperclip.copy(text)
-            except:
-                pass
+                with open("debug.log", "a") as f:
+                    f.write(f"[DEBUG] Text copied to clipboard\n")
+            except Exception as e:
+                with open("debug.log", "a") as f:
+                    f.write(f"[DEBUG] Failed to copy: {e}\n")
         if self.config.auto_paste:
             QTimer.singleShot(100, lambda: self._type(text))
 
     def _error(self, err):
+        with open("debug.log", "a") as f:
+            f.write(f"[ERROR] Transcription error: {err}\n")
         self.status_label.setText("Ошибка")
 
     def _type(self, text):

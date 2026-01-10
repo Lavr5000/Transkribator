@@ -122,12 +122,35 @@ class HotkeyManager:
         self._pressed_keys.add(key)
 
         # Check if hotkey combination is pressed
-        if self._pynput_hotkey.issubset(self._pressed_keys):
+        # Convert both sets to comparable format (use hash or special comparison)
+        pressed_set = {self._key_to_compare(k) for k in self._pressed_keys}
+        hotkey_set = {self._key_to_compare(k) for k in self._pynput_hotkey}
+
+        if hotkey_set.issubset(pressed_set):
             self._on_hotkey_pressed()
+
+    def _key_to_compare(self, key):
+        """Convert key to comparable format."""
+        from pynput import keyboard as pk
+        # For KeyCode, use the char/value
+        if isinstance(key, pk.KeyCode):
+            return ('KeyCode', key.char, key.vk)
+        # For special keys, use the name
+        elif isinstance(key, pk.Key):
+            return ('Key', str(key))
+        return key
 
     def _on_key_release_pynput(self, key):
         """Handle key release for pynput."""
-        self._pressed_keys.discard(key)
+        # Remove key by comparing values, not objects
+        to_remove = None
+        key_comp = self._key_to_compare(key)
+        for k in self._pressed_keys:
+            if self._key_to_compare(k) == key_comp:
+                to_remove = k
+                break
+        if to_remove:
+            self._pressed_keys.discard(to_remove)
 
     def _on_hotkey_pressed(self):
         """Called when hotkey is pressed."""
