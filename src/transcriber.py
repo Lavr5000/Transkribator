@@ -92,9 +92,6 @@ class Transcriber:
                 on_progress=self.on_progress
             )
 
-            if self.on_progress:
-                self.on_progress(f"Backend: {self.backend_name}")
-
         except Exception as e:
             if self.on_progress:
                 self.on_progress(f"Error creating backend: {e}")

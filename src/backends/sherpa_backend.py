@@ -126,9 +126,6 @@ class SherpaBackend(BaseBackend):
             self._loading = True
 
         try:
-            if self.on_progress:
-                self.on_progress(f"Loading Sherpa-ONNX {self.model_size}...")
-
             model_dir = self._get_model_dir()
 
             # Check if model exists
@@ -157,9 +154,6 @@ class SherpaBackend(BaseBackend):
                 debug=False,
             )
 
-            if self.on_progress:
-                self.on_progress(f"Sherpa-ONNX {self.model_size} loaded")
-
         except Exception as e:
             if self.on_progress:
                 self.on_progress(f"Error loading Sherpa-ONNX: {e}")
@@ -171,9 +165,6 @@ class SherpaBackend(BaseBackend):
         """Unload the model to free memory."""
         with self._lock:
             self._recognizer = None
-
-        if self.on_progress:
-            self.on_progress("Sherpa-ONNX model unloaded")
 
     def transcribe(
         self,
@@ -196,9 +187,6 @@ class SherpaBackend(BaseBackend):
         start_time = time.time()
 
         try:
-            if self.on_progress:
-                self.on_progress("Transcribing with Sherpa-ONNX...")
-
             # Ensure audio is float32 and mono
             if audio.dtype != np.float32:
                 audio = audio.astype(np.float32)
@@ -227,14 +215,9 @@ class SherpaBackend(BaseBackend):
 
             process_time = time.time() - start_time
 
-            if self.on_progress:
-                self.on_progress(f"Sherpa-ONNX done ({process_time:.1f}s)")
-
             return text, process_time
 
         except Exception as e:
-            if self.on_progress:
-                self.on_progress(f"Sherpa-ONNX error: {e}")
             return "", 0.0
 
     def is_model_loaded(self) -> bool:
