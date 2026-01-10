@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Callable, Optional, Tuple
 import numpy as np
 
+from .text_processor import AdvancedTextProcessor
+
 # Try faster-whisper first, fallback to openai-whisper
 WHISPER_BACKEND = None
 
@@ -29,17 +31,26 @@ class Transcriber:
         device: str = "auto",
         compute_type: str = "auto",
         language: str = "auto",
-        on_progress: Optional[Callable[[str], None]] = None
+        on_progress: Optional[Callable[[str], None]] = None,
+        enable_post_processing: bool = True
     ):
         self.model_size = model_size
         self.device = device
         self.compute_type = compute_type
         self.language = language if language != "auto" else None
         self.on_progress = on_progress
+        self.enable_post_processing = enable_post_processing
 
         self._model = None
         self._loading = False
         self._lock = threading.Lock()
+
+        # Initialize text processor
+        lang_code = language if language != "auto" else "ru"
+        self.text_processor = AdvancedTextProcessor(
+            language=lang_code,
+            enable_corrections=enable_post_processing
+        )
 
     def _detect_device(self) -> Tuple[str, str]:
         """Detect the best device and compute type."""
@@ -168,6 +179,10 @@ class Transcriber:
                     fp16=False
                 )
                 text = result["text"].strip()
+
+            # Apply post-processing to improve text quality
+            if self.enable_post_processing and self.text_processor:
+                text = self.text_processor.process(text)
 
             process_time = time.time() - start_time
 

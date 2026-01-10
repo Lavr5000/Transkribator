@@ -279,7 +279,8 @@ class MainWindow(QMainWindow):
             device=self.config.device,
             compute_type=self.config.compute_type,
             language=self.config.language,
-            on_progress=self._on_transcriber_progress
+            on_progress=self._on_transcriber_progress,
+            enable_post_processing=self.config.enable_post_processing
         )
 
         self.hotkey_manager = HotkeyManager(on_hotkey=self._on_hotkey)
@@ -425,6 +426,18 @@ class MainWindow(QMainWindow):
         lang_layout.addWidget(self.lang_combo)
 
         settings_layout.addWidget(lang_group)
+
+        # Text processing options
+        processing_group = QGroupBox("Text Processing")
+        processing_layout = QVBoxLayout(processing_group)
+
+        self.post_process_cb = QCheckBox("Enable post-processing")
+        self.post_process_cb.setChecked(self.config.enable_post_processing)
+        self.post_process_cb.setToolTip("Improve transcription accuracy by fixing common errors")
+        self.post_process_cb.toggled.connect(self._on_post_process_changed)
+        processing_layout.addWidget(self.post_process_cb)
+
+        settings_layout.addWidget(processing_group)
 
         # Behavior options
         behavior_group = QGroupBox("Behavior")
@@ -690,6 +703,21 @@ class MainWindow(QMainWindow):
         self.config.language = lang_id
         self.config.save()
         self.transcriber.language = lang_id if lang_id != "auto" else None
+
+        # Update text processor language
+        from .text_processor import AdvancedTextProcessor
+        lang_code = lang_id if lang_id != "auto" else "ru"
+        self.transcriber.text_processor = AdvancedTextProcessor(
+            language=lang_code,
+            enable_corrections=self.config.enable_post_processing
+        )
+
+    def _on_post_process_changed(self, checked: bool):
+        """Handle post-processing toggle."""
+        self.config.enable_post_processing = checked
+        self.config.save()
+        self.transcriber.enable_post_processing = checked
+        self.transcriber.text_processor.enable_corrections = checked
 
     def _on_auto_copy_changed(self, checked: bool):
         """Handle auto-copy toggle."""

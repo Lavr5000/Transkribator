@@ -16,6 +16,7 @@ class Config:
     language: str = "auto"  # auto-detect or specific language code
     device: str = "auto"  # auto, cpu, cuda
     compute_type: str = "auto"  # auto, int8, float16, float32
+    enable_post_processing: bool = True  # Enable text post-processing for better accuracy
 
     # Audio settings
     sample_rate: int = 16000
