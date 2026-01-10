@@ -766,11 +766,11 @@ class MainWindow(QMainWindow):
             self.config.model_size = model_id
             self.config.save()
 
-            # Unload current model and reload
-            self.transcriber.unload_model()
-            self.transcriber.model_size = model_id
+            # Switch to new model (recreates backend if needed)
+            current_backend = self.backend_combo.currentData()
+            self.transcriber.switch_backend(current_backend, model_id)
+
             self.status_label.setText(f"Model changed to {model_id}")
-            self._load_model_async()
 
     def _on_language_changed(self, index: int):
         """Handle language selection change."""
