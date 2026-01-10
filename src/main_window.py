@@ -18,6 +18,7 @@ from .config import Config, WHISPER_MODELS, SHERPA_MODELS, PODLODKA_MODELS, LANG
 from .audio_recorder import AudioRecorder
 from .transcriber import Transcriber, get_available_backends
 from .hotkeys import HotkeyManager, type_text
+from .history_manager import HistoryManager
 
 try:
     import pyperclip
@@ -126,8 +127,21 @@ QComboBox:hover {{
 }}
 
 QComboBox::drop-down {{
-    border: none;
-    width: 30px;
+    subcontrol-origin: padding;
+    subcontrol-position: right center;
+    width: 20px;
+    border-left: 1px solid {COLORS['border']};
+    border-radius: 0;
+}}
+
+QComboBox::down-arrow {{
+    image: none;
+    border: 2px solid {COLORS['text_secondary']};
+    width: 8px;
+    height: 8px;
+    border-top: none;
+    border-right: none;
+    transform: rotate(45deg);
 }}
 
 QComboBox QAbstractItemView {{
@@ -286,6 +300,8 @@ class MainWindow(QMainWindow):
 
         self.hotkey_manager = HotkeyManager(on_hotkey=self._on_hotkey)
 
+        self.history_manager = HistoryManager(max_entries=50)
+
         self._transcription_thread: Optional[TranscriptionThread] = None
         self._recording_start_time: float = 0
 
@@ -293,6 +309,9 @@ class MainWindow(QMainWindow):
         self._setup_ui()
         self._setup_tray()
         self._connect_signals()
+
+        # Initialize history display
+        self._update_history_display()
 
         # Register hotkey
         self._register_hotkey()
@@ -362,46 +381,50 @@ class MainWindow(QMainWindow):
         layout.addWidget(hotkey_hint)
         self.hotkey_hint = hotkey_hint
 
-        # Tabs
-        tabs = QTabWidget()
-        layout.addWidget(tabs)
+        # Tabs - make instance variable to prevent garbage collection
+        self.tabs = QTabWidget()
+        self.tabs.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        layout.addWidget(self.tabs)
 
         # Tab 1: Transcription
         transcription_tab = QWidget()
         transcription_layout = QVBoxLayout(transcription_tab)
 
         self.text_edit = QTextEdit()
-        self.text_edit.setPlaceholderText("Transcribed text will appear here...")
+        self.text_edit.setPlaceholderText("Транскрибированный текст появится здесь...")
         self.text_edit.setMinimumHeight(120)
         transcription_layout.addWidget(self.text_edit)
 
         # Action buttons
         button_layout = QHBoxLayout()
 
-        self.copy_button = QPushButton("Copy")
+        self.copy_button = QPushButton("Копировать")
         self.copy_button.clicked.connect(self._copy_text)
         button_layout.addWidget(self.copy_button)
 
-        self.paste_button = QPushButton("Paste")
+        self.paste_button = QPushButton("Вставить")
         self.paste_button.clicked.connect(self._paste_text)
         button_layout.addWidget(self.paste_button)
 
-        self.clear_button = QPushButton("Clear")
+        self.clear_button = QPushButton("Очистить")
         self.clear_button.clicked.connect(self._clear_text)
         button_layout.addWidget(self.clear_button)
 
         transcription_layout.addLayout(button_layout)
-        tabs.addTab(transcription_tab, "Transcription")
+        self.tabs.addTab(transcription_tab, "Транскрибация")
 
         # Tab 2: Settings
         settings_tab = QWidget()
         settings_layout = QVBoxLayout(settings_tab)
 
         # Backend selection
-        backend_group = QGroupBox("Speech Recognition Backend")
+        backend_group = QGroupBox("Движок распознавания речи")
+        backend_group.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         backend_layout = QVBoxLayout(backend_group)
 
         self.backend_combo = QComboBox()
+        self.backend_combo.setEnabled(True)
+        self.backend_combo.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         for backend_id, backend_name in BACKENDS.items():
             self.backend_combo.addItem(backend_name, backend_id)
 
@@ -413,10 +436,13 @@ class MainWindow(QMainWindow):
         settings_layout.addWidget(backend_group)
 
         # Model selection (dynamically updated based on backend)
-        model_group = QGroupBox("Model")
+        model_group = QGroupBox("Модель")
+        model_group.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         model_layout = QVBoxLayout(model_group)
 
         self.model_combo = QComboBox()
+        self.model_combo.setEnabled(True)
+        self.model_combo.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._update_model_options()  # Populate based on current backend
         self.model_combo.currentIndexChanged.connect(self._on_model_changed)
         model_layout.addWidget(self.model_combo)
@@ -424,10 +450,13 @@ class MainWindow(QMainWindow):
         settings_layout.addWidget(model_group)
 
         # Language selection
-        lang_group = QGroupBox("Language")
+        lang_group = QGroupBox("Язык")
+        lang_group.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         lang_layout = QVBoxLayout(lang_group)
 
         self.lang_combo = QComboBox()
+        self.lang_combo.setEnabled(True)
+        self.lang_combo.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         for lang_id, lang_name in LANGUAGES.items():
             self.lang_combo.addItem(lang_name, lang_id)
 
@@ -440,32 +469,38 @@ class MainWindow(QMainWindow):
         settings_layout.addWidget(lang_group)
 
         # Text processing options
-        processing_group = QGroupBox("Text Processing")
+        processing_group = QGroupBox("Обработка текста")
+        processing_group.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         processing_layout = QVBoxLayout(processing_group)
 
-        self.post_process_cb = QCheckBox("Enable post-processing")
+        self.post_process_cb = QCheckBox("Включить пост-обработку")
+        self.post_process_cb.setEnabled(True)
         self.post_process_cb.setChecked(self.config.enable_post_processing)
-        self.post_process_cb.setToolTip("Improve transcription accuracy by fixing common errors")
+        self.post_process_cb.setToolTip("Улучшает точность транскрибации, исправляя распространенные ошибки")
         self.post_process_cb.toggled.connect(self._on_post_process_changed)
         processing_layout.addWidget(self.post_process_cb)
 
         settings_layout.addWidget(processing_group)
 
         # Behavior options
-        behavior_group = QGroupBox("Behavior")
+        behavior_group = QGroupBox("Поведение")
+        behavior_group.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         behavior_layout = QVBoxLayout(behavior_group)
 
-        self.auto_copy_cb = QCheckBox("Auto-copy to clipboard")
+        self.auto_copy_cb = QCheckBox("Авто-копирование в буфер")
+        self.auto_copy_cb.setEnabled(True)
         self.auto_copy_cb.setChecked(self.config.auto_copy)
         self.auto_copy_cb.toggled.connect(self._on_auto_copy_changed)
         behavior_layout.addWidget(self.auto_copy_cb)
 
-        self.auto_paste_cb = QCheckBox("Auto-paste after transcription")
+        self.auto_paste_cb = QCheckBox("Авто-вставка после транскрибации")
+        self.auto_paste_cb.setEnabled(True)
         self.auto_paste_cb.setChecked(self.config.auto_paste)
         self.auto_paste_cb.toggled.connect(self._on_auto_paste_changed)
         behavior_layout.addWidget(self.auto_paste_cb)
 
-        self.always_top_cb = QCheckBox("Always on top")
+        self.always_top_cb = QCheckBox("Поверх всех окон")
+        self.always_top_cb.setEnabled(True)
         self.always_top_cb.setChecked(self.config.always_on_top)
         self.always_top_cb.toggled.connect(self._on_always_top_changed)
         behavior_layout.addWidget(self.always_top_cb)
@@ -473,29 +508,49 @@ class MainWindow(QMainWindow):
         settings_layout.addWidget(behavior_group)
         settings_layout.addStretch()
 
-        tabs.addTab(settings_tab, "Settings")
+        print(f"[DEBUG] Settings widgets created: backend={len(self.backend_combo)} items, model={len(self.model_combo)} items, lang={len(self.lang_combo)} items")
 
-        # Tab 3: Stats
-        stats_tab = QWidget()
-        stats_layout = QVBoxLayout(stats_tab)
+        self.tabs.addTab(settings_tab, "Настройки")
 
-        stats_group = QGroupBox("Usage Statistics")
+        # Tab 3: History (Stats)
+        history_tab = QWidget()
+        history_layout = QVBoxLayout(history_tab)
+
+        # Statistics section
+        stats_group = QGroupBox("Статистика")
         stats_inner = QVBoxLayout(stats_group)
 
-        self.stats_words = QLabel(f"Total words: {self.config.total_words:,}")
+        self.stats_words = QLabel(f"Всего слов: {self.config.total_words:,}")
         stats_inner.addWidget(self.stats_words)
 
-        self.stats_recordings = QLabel(f"Recordings: {self.config.total_recordings:,}")
+        self.stats_recordings = QLabel(f"Записей: {self.config.total_recordings:,}")
         stats_inner.addWidget(self.stats_recordings)
 
         saved_mins = self.config.total_seconds_saved / 60
-        self.stats_saved = QLabel(f"Time saved: {saved_mins:.1f} minutes")
+        self.stats_saved = QLabel(f"Сохранено времени: {saved_mins:.1f} мин")
         stats_inner.addWidget(self.stats_saved)
 
-        stats_layout.addWidget(stats_group)
-        stats_layout.addStretch()
+        history_layout.addWidget(stats_group)
 
-        tabs.addTab(stats_tab, "Stats")
+        # History section
+        history_group = QGroupBox("История транскрибаций (последние 50)")
+        history_inner = QVBoxLayout(history_group)
+
+        # History list with scroll
+        self.history_text = QTextEdit()
+        self.history_text.setReadOnly(True)
+        self.history_text.setMinimumHeight(300)
+        self.history_text.setPlaceholderText("История транскрибаций будет отображаться здесь...")
+        history_inner.addWidget(self.history_text)
+
+        # Clear history button
+        clear_history_btn = QPushButton("Очистить историю")
+        clear_history_btn.clicked.connect(self._clear_history)
+        history_inner.addWidget(clear_history_btn)
+
+        history_layout.addWidget(history_group)
+
+        self.tabs.addTab(history_tab, "История")
 
     def _setup_tray(self):
         """Setup system tray icon."""
@@ -509,18 +564,18 @@ class MainWindow(QMainWindow):
         # Tray menu
         tray_menu = QMenu()
 
-        show_action = QAction("Show", self)
+        show_action = QAction("Показать", self)
         show_action.triggered.connect(self.show)
         tray_menu.addAction(show_action)
 
-        record_action = QAction("Start Recording", self)
+        record_action = QAction("Начать запись", self)
         record_action.triggered.connect(self._toggle_recording)
         tray_menu.addAction(record_action)
         self.tray_record_action = record_action
 
         tray_menu.addSeparator()
 
-        quit_action = QAction("Quit", self)
+        quit_action = QAction("Выход", self)
         quit_action.triggered.connect(self._quit_app)
         tray_menu.addAction(quit_action)
 
@@ -577,8 +632,8 @@ class MainWindow(QMainWindow):
             self.record_button.setProperty("recording", True)
             self.record_button.style().unpolish(self.record_button)
             self.record_button.style().polish(self.record_button)
-            self.status_label.setText("Recording...")
-            self.tray_record_action.setText("Stop Recording")
+            self.status_label.setText("Запись...")
+            self.tray_record_action.setText("Остановить запись")
 
             # Change tray icon color
             pixmap = QPixmap(32, 32)
@@ -593,7 +648,7 @@ class MainWindow(QMainWindow):
         self.record_button.style().unpolish(self.record_button)
         self.record_button.style().polish(self.record_button)
         self.level_bar.setValue(0)
-        self.tray_record_action.setText("Start Recording")
+        self.tray_record_action.setText("Начать запись")
 
         # Reset tray icon
         pixmap = QPixmap(32, 32)
@@ -601,16 +656,16 @@ class MainWindow(QMainWindow):
         self.tray_icon.setIcon(QIcon(pixmap))
 
         if audio is None or len(audio) == 0:
-            self.status_label.setText("No audio recorded")
+            self.status_label.setText("Нет аудио")
             return
 
         duration = self.recorder.get_duration(audio)
         if duration < 0.5:
-            self.status_label.setText("Recording too short")
+            self.status_label.setText("Запись слишком короткая")
             return
 
         # Start transcription in background
-        self.status_label.setText("Transcribing...")
+        self.status_label.setText("Транскрибация...")
         self._transcription_thread = TranscriptionThread(
             self.transcriber,
             audio,
@@ -623,7 +678,7 @@ class MainWindow(QMainWindow):
     def _on_transcription_done(self, text: str, process_time: float):
         """Handle transcription completion."""
         if not text:
-            self.status_label.setText("No speech detected")
+            self.status_label.setText("Речь не обнаружена")
             return
 
         # Update text display
@@ -634,6 +689,15 @@ class MainWindow(QMainWindow):
         recording_duration = time.time() - self._recording_start_time
         self.config.update_stats(word_count, recording_duration)
         self._update_stats_display()
+
+        # Save to history
+        self.history_manager.add_entry(
+            text=text,
+            duration=process_time,
+            backend=self.config.backend,
+            model=self.config.model_size
+        )
+        self._update_history_display()  # Refresh history tab
 
         # Auto-copy
         if self.config.auto_copy and CLIPBOARD_AVAILABLE:
@@ -646,11 +710,11 @@ class MainWindow(QMainWindow):
         if self.config.auto_paste:
             QTimer.singleShot(100, lambda: self._auto_type_text(text))
 
-        self.status_label.setText(f"Done ({process_time:.1f}s, {word_count} words)")
+        self.status_label.setText(f"Готово ({process_time:.1f}с, {word_count} слов)")
 
     def _on_transcription_error(self, error: str):
         """Handle transcription error."""
-        self.status_label.setText(f"Error: {error}")
+        self.status_label.setText(f"Ошибка: {error}")
 
     def _auto_type_text(self, text: str):
         """Auto-type the transcribed text."""
@@ -665,21 +729,21 @@ class MainWindow(QMainWindow):
         if text and CLIPBOARD_AVAILABLE:
             try:
                 pyperclip.copy(text)
-                self.status_label.setText("Copied to clipboard")
+                self.status_label.setText("Скопировано в буфер")
             except Exception:
-                self.status_label.setText("Copy failed")
+                self.status_label.setText("Ошибка копирования")
 
     def _paste_text(self):
         """Paste/type the text."""
         text = self.text_edit.toPlainText()
         if text:
             self._auto_type_text(text)
-            self.status_label.setText("Text typed")
+            self.status_label.setText("Текст напечатан")
 
     def _clear_text(self):
         """Clear the text area."""
         self.text_edit.clear()
-        self.status_label.setText("Cleared")
+        self.status_label.setText("Очищено")
 
     def _update_status(self, message: str):
         """Update status label."""
@@ -691,13 +755,48 @@ class MainWindow(QMainWindow):
 
     def _update_stats_display(self):
         """Update statistics display."""
-        self.stats_words.setText(f"Total words: {self.config.total_words:,}")
-        self.stats_recordings.setText(f"Recordings: {self.config.total_recordings:,}")
+        self.stats_words.setText(f"Всего слов: {self.config.total_words:,}")
+        self.stats_recordings.setText(f"Записей: {self.config.total_recordings:,}")
         saved_mins = self.config.total_seconds_saved / 60
-        self.stats_saved.setText(f"Time saved: {saved_mins:.1f} minutes")
+        self.stats_saved.setText(f"Сохранено времени: {saved_mins:.1f} мин")
+
+    def _update_history_display(self):
+        """Update history display with all entries."""
+        history = self.history_manager.get_history()
+
+        if not history:
+            self.history_text.setPlainText("История пуста")
+            return
+
+        lines = []
+        for idx, entry in enumerate(history, 1):
+            lines.append(f"[{idx}] {entry.timestamp}")
+            lines.append(f"Модель: {entry.backend}/{entry.model}")
+            lines.append(f"Длительность: {entry.duration:.1f}с | Слов: {entry.word_count}")
+            lines.append(f"Текст:\n{entry.text}")
+            lines.append("-" * 80)
+            lines.append("")
+
+        self.history_text.setPlainText("\n".join(lines))
+
+    def _clear_history(self):
+        """Clear transcription history."""
+        reply = QMessageBox.question(
+            self,
+            "Подтверждение",
+            "Вы уверены, что хотите очистить историю транскрибаций?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self.history_manager.clear_history()
+            self._update_history_display()
+            QMessageBox.information(self, "История", "История очищена")
 
     def _update_model_options(self):
         """Update model combo box based on selected backend."""
+        # Block signals to prevent unwanted triggers during update
+        self.model_combo.blockSignals(True)
         self.model_combo.clear()
 
         current_backend = self.backend_combo.currentData()
@@ -730,9 +829,13 @@ class MainWindow(QMainWindow):
         elif model_keys:
             self.model_combo.setCurrentIndex(0)
 
+        # Re-enable signals
+        self.model_combo.blockSignals(False)
+
     def _on_backend_changed(self, index: int):
         """Handle backend selection change."""
         backend_id = self.backend_combo.currentData()
+        print(f"[DEBUG] _on_backend_changed called: backend_id={backend_id}, index={index}")
 
         if backend_id != self.config.backend:
             self.config.backend = backend_id
@@ -757,11 +860,14 @@ class MainWindow(QMainWindow):
             # Recreate transcriber with new backend
             self.transcriber.switch_backend(backend_id, default_model)
 
-            self.status_label.setText(f"Backend changed to {backend_id}")
+            self.status_label.setText(f"Движок изменен на {backend_id}")
+            print(f"[DEBUG] Backend switched to {backend_id} with model {default_model}")
 
     def _on_model_changed(self, index: int):
         """Handle model selection change."""
         model_id = self.model_combo.currentData()
+        print(f"[DEBUG] _on_model_changed called: model_id={model_id}, index={index}")
+
         if model_id != self.config.model_size:
             self.config.model_size = model_id
             self.config.save()
@@ -770,7 +876,8 @@ class MainWindow(QMainWindow):
             current_backend = self.backend_combo.currentData()
             self.transcriber.switch_backend(current_backend, model_id)
 
-            self.status_label.setText(f"Model changed to {model_id}")
+            self.status_label.setText(f"Модель изменена на {model_id}")
+            print(f"[DEBUG] Model switched to {model_id}")
 
     def _on_language_changed(self, index: int):
         """Handle language selection change."""
