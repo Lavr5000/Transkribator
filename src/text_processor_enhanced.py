@@ -28,16 +28,11 @@ class EnhancedTextProcessor:
 
         self._load_corrections()
 
-        # Initialize punctuation model
+        # Pre-compile regex patterns for performance
+        self._compile_patterns()
+
+        # Punctuation model will be loaded lazily on first use
         self.punctuation_model = None
-        if enable_punctuation and PUNCTUATION_AVAILABLE:
-            try:
-                print("[INFO] Loading punctuation model...")
-                self.punctuation_model = PunctuationModel()
-                print("[INFO] Punctuation model loaded")
-            except Exception as e:
-                print(f"[WARNING] Failed to load punctuation model: {e}")
-                self.punctuation_model = None
 
     def _load_corrections(self):
         """Load error correction rules for the target language."""
@@ -170,6 +165,21 @@ class EnhancedTextProcessor:
             (r'([,.!?;:])(?=[A-Za-z])', r'\1 '),
         ]
 
+    def _compile_patterns(self):
+        """Pre-compile regex patterns for error correction to improve performance."""
+        self._compiled_patterns = []
+
+        # Sort corrections by length (longest first) for proper matching
+        sorted_corrections = sorted(self.corrections.items(), key=lambda x: len(x[0]), reverse=True)
+
+        # Pre-compile all patterns
+        for wrong, correct in sorted_corrections:
+            if len(wrong) <= 10:
+                pattern = re.compile(r'\b' + re.escape(wrong) + r'\b', re.IGNORECASE)
+            else:
+                pattern = re.compile(re.escape(wrong), re.IGNORECASE)
+            self._compiled_patterns.append((pattern, correct))
+
     def process(self, text: str) -> str:
         """
         Apply all post-processing improvements to text.
@@ -202,18 +212,12 @@ class EnhancedTextProcessor:
         return text
 
     def _fix_errors(self, text: str) -> str:
-        """Fix common transcription errors."""
+        """Fix common transcription errors using pre-compiled patterns."""
         # Fix repeated letters
         text = self._fix_repeated_letters(text)
 
-        # Apply corrections from LONGEST to SHORTEST
-        sorted_corrections = sorted(self.corrections.items(), key=lambda x: len(x[0]), reverse=True)
-
-        for wrong, correct in sorted_corrections:
-            if len(wrong) <= 10:
-                pattern = re.compile(r'\b' + re.escape(wrong) + r'\b', re.IGNORECASE)
-            else:
-                pattern = re.compile(re.escape(wrong), re.IGNORECASE)
+        # Apply pre-compiled corrections (already sorted by length)
+        for pattern, correct in self._compiled_patterns:
             text = pattern.sub(correct, text)
 
         return text
@@ -234,6 +238,20 @@ class EnhancedTextProcessor:
 
     def _add_punctuation(self, text: str) -> str:
         """Restore punctuation using ML model."""
+        if not self.enable_punctuation or not PUNCTUATION_AVAILABLE:
+            return text
+
+        # Lazy load punctuation model on first use
+        if self.punctuation_model is None:
+            try:
+                print("[INFO] Loading punctuation model...")
+                self.punctuation_model = PunctuationModel()
+                print("[INFO] Punctuation model loaded")
+            except Exception as e:
+                print(f"[WARNING] Failed to load punctuation model: {e}")
+                self.punctuation_model = None
+                return text
+
         try:
             # Process with punctuation model
             result = self.punctuation_model.restore_punctuation(text)

@@ -144,11 +144,17 @@ class WhisperBackend(BaseBackend):
             # Resample if necessary (Whisper expects 16kHz)
             if sample_rate != 16000:
                 try:
-                    import scipy.signal
-                    num_samples = int(len(audio) * 16000 / sample_rate)
-                    audio = scipy.signal.resample(audio, num_samples)
+                    # Use librosa if available (faster than scipy)
+                    import librosa
+                    audio = librosa.resample(audio, orig_sr=sample_rate, target_sr=16000)
                 except ImportError:
-                    pass
+                    # Fallback to scipy (slower)
+                    try:
+                        import scipy.signal
+                        num_samples = int(len(audio) * 16000 / sample_rate)
+                        audio = scipy.signal.resample(audio, num_samples)
+                    except ImportError:
+                        pass
 
             language = self.language if self.language != "auto" else None
 
