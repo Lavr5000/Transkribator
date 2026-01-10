@@ -12,12 +12,12 @@ class Config:
     """Application configuration."""
 
     # Backend selection
-    backend: str = "whisper"  # whisper, sherpa
+    backend: str = "sherpa"  # whisper, sherpa (sherpa is ~30% faster for Russian)
 
     # Model settings
-    model_size: str = "base"  # For Whisper: tiny, base, small, medium, large
-                              # For Sherpa: giga-am-v2-ru, giga-am-ru
-                              # For Podlodka: podlodka-turbo
+    model_size: str = "giga-am-v2-ru"  # For Sherpa: giga-am-v2-ru (default), giga-am-ru
+                                      # For Whisper: tiny, base, small, medium, large
+                                      # For Podlodka: podlodka-turbo
     language: str = "auto"  # auto-detect or specific language code
     device: str = "auto"  # auto, cpu, cuda
     compute_type: str = "auto"  # auto, int8, float16, float32
