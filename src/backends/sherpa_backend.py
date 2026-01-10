@@ -8,6 +8,14 @@ import numpy as np
 
 from .base import BaseBackend
 
+# Import enhanced text processor for better punctuation
+try:
+    from ..text_processor_enhanced import EnhancedTextProcessor
+    ENHANCED_PROCESSOR_AVAILABLE = True
+except ImportError:
+    from ..text_processor import AdvancedTextProcessor
+    ENHANCED_PROCESSOR_AVAILABLE = False
+
 try:
     import sherpa_onnx
     SHERPA_AVAILABLE = True

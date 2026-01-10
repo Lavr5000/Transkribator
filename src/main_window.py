@@ -14,9 +14,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread, QSize
 from PyQt6.QtGui import QIcon, QPixmap, QFont, QAction, QColor, QPalette
 
-from .config import Config, WHISPER_MODELS, SHERPA_MODELS, LANGUAGES, BACKENDS
+from .config import Config, WHISPER_MODELS, SHERPA_MODELS, PODLODKA_MODELS, LANGUAGES, BACKENDS
 from .audio_recorder import AudioRecorder
-from .transcriber import Transcriber, get_available_backend
+from .transcriber import Transcriber, get_available_backends
 from .hotkeys import HotkeyManager, type_text
 
 try:
@@ -708,9 +708,20 @@ class MainWindow(QMainWindow):
         elif current_backend == "sherpa":
             for model_id, model_name in SHERPA_MODELS.items():
                 self.model_combo.addItem(model_name, model_id)
+        elif current_backend == "podlodka-turbo":
+            for model_id, model_name in PODLODKA_MODELS.items():
+                self.model_combo.addItem(model_name, model_id)
 
         # Set current model
-        models = WHISPER_MODELS if current_backend == "whisper" else SHERPA_MODELS
+        if current_backend == "whisper":
+            models = WHISPER_MODELS
+        elif current_backend == "sherpa":
+            models = SHERPA_MODELS
+        elif current_backend == "podlodka-turbo":
+            models = PODLODKA_MODELS
+        else:
+            models = {}
+
         model_keys = list(models.keys())
 
         if self.config.model_size in model_keys:
@@ -735,8 +746,10 @@ class MainWindow(QMainWindow):
                 default_model = "base"
             elif backend_id == "sherpa":
                 default_model = "giga-am-v2-ru"
+            elif backend_id == "podlodka-turbo":
+                default_model = "podlodka-turbo"
             else:
-                default_model = list(self.model_combo.currentData().keys())[0] if self.model_combo.count() > 0 else "base"
+                default_model = "base"
 
             self.config.model_size = default_model
             self.config.save()

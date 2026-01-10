@@ -17,6 +17,7 @@ class Config:
     # Model settings
     model_size: str = "base"  # For Whisper: tiny, base, small, medium, large
                               # For Sherpa: giga-am-v2-ru, giga-am-ru
+                              # For Podlodka: podlodka-turbo
     language: str = "auto"  # auto-detect or specific language code
     device: str = "auto"  # auto, cpu, cuda
     compute_type: str = "auto"  # auto, int8, float16, float32
@@ -90,6 +91,7 @@ class Config:
 BACKENDS = {
     "whisper": "Whisper (OpenAI)",
     "sherpa": "Sherpa-ONNX (GigaAM Russian)",
+    "podlodka-turbo": "Whisper-Podlodka-Turbo (Russian fine-tuned)",
 }
 
 # Available Whisper models
@@ -106,6 +108,11 @@ WHISPER_MODELS = {
 SHERPA_MODELS = {
     "giga-am-v2-ru": "GigaAM v2 Russian (2025, recommended)",
     "giga-am-ru": "GigaAM Russian (2024)",
+}
+
+# Available Podlodka-Turbo models
+PODLODKA_MODELS = {
+    "podlodka-turbo": "Podlodka-Turbo (Russian fine-tuned, recommended)",
 }
 
 # Supported languages

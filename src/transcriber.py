@@ -12,6 +12,13 @@ from typing import Callable, Optional, Tuple
 import numpy as np
 
 from .text_processor import AdvancedTextProcessor
+
+# Try to import enhanced text processor with punctuation
+try:
+    from .text_processor_enhanced import EnhancedTextProcessor
+    ENHANCED_PROCESSOR_AVAILABLE = True
+except ImportError:
+    ENHANCED_PROCESSOR_AVAILABLE = False
 from .backends import get_backend, BaseBackend
 
 
@@ -46,17 +53,29 @@ class Transcriber:
         self.compute_type = compute_type
         self.language = language if language != "auto" else None
         self.on_progress = on_progress
-        self.enable_post_processing = enable_post_processing
 
         self._backend = None
         self._lock = threading.Lock()
 
         # Initialize text processor
         lang_code = language if language != "auto" else "ru"
-        self.text_processor = AdvancedTextProcessor(
-            language=lang_code,
-            enable_corrections=enable_post_processing
-        )
+
+        # Use EnhancedTextProcessor for Sherpa backend (better punctuation)
+        # Use AdvancedTextProcessor for Whisper (already has punctuation)
+        if backend == "sherpa" and ENHANCED_PROCESSOR_AVAILABLE:
+            self.text_processor = EnhancedTextProcessor(
+                language=lang_code,
+                enable_corrections=enable_post_processing,
+                enable_punctuation=True  # Enable punctuation restoration
+            )
+        else:
+            self.text_processor = AdvancedTextProcessor(
+                language=lang_code,
+                enable_corrections=enable_post_processing
+            )
+
+        # NOW set enable_post_processing (after text_processor is initialized)
+        self._enable_post_processing = enable_post_processing
 
         # Create backend instance
         self._create_backend()
@@ -207,7 +226,8 @@ class Transcriber:
         if self.text_processor:
             self.text_processor.enable_corrections = value
 
-    def _enable_post_processing: bool = True
+    # Private field declaration
+    _enable_post_processing: bool = True
 
 
 def get_available_backends() -> list:
