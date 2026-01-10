@@ -186,8 +186,8 @@ class Transcriber:
 
             process_time = time.time() - start_time
 
-            if self.on_progress:
-                self.on_progress(f"Done ({process_time:.1f}s)")
+            # Don't send "Done" progress - it interferes with final "Готово" status
+            # The main_window handles final status display
 
             return text, process_time
 
