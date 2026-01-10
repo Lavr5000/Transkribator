@@ -79,9 +79,6 @@ class WhisperBackend(BaseBackend):
             self._loading = True
 
         try:
-            if self.on_progress:
-                self.on_progress(f"Loading Whisper {self.model_size} model...")
-
             device, compute_type = self._detect_device()
             self._detected_device = device
             self._detected_compute_type = compute_type
@@ -95,9 +92,6 @@ class WhisperBackend(BaseBackend):
             else:
                 # OpenAI Whisper
                 self._model = whisper.load_model(self.model_size, device=device)
-
-            if self.on_progress:
-                self.on_progress(f"Whisper model loaded ({device})")
 
         except Exception as e:
             if self.on_progress:
@@ -118,9 +112,6 @@ class WhisperBackend(BaseBackend):
                     torch.cuda.empty_cache()
             except ImportError:
                 pass
-
-        if self.on_progress:
-            self.on_progress("Whisper model unloaded")
 
     def transcribe(
         self,
@@ -143,9 +134,6 @@ class WhisperBackend(BaseBackend):
         start_time = time.time()
 
         try:
-            if self.on_progress:
-                self.on_progress("Transcribing with Whisper...")
-
             # Ensure audio is float32 and mono
             if audio.dtype != np.float32:
                 audio = audio.astype(np.float32)
@@ -185,14 +173,9 @@ class WhisperBackend(BaseBackend):
 
             process_time = time.time() - start_time
 
-            if self.on_progress:
-                self.on_progress(f"Whisper transcription done ({process_time:.1f}s)")
-
             return text, process_time
 
         except Exception as e:
-            if self.on_progress:
-                self.on_progress(f"Whisper transcription error: {e}")
             return "", 0.0
 
     def is_model_loaded(self) -> bool:

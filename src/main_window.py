@@ -647,12 +647,12 @@ class MainWindow(QMainWindow):
         # Status label (left)
         self.status_label = QLabel("Готово", self.central)
         self.status_label.setStyleSheet("color: white; font-size: 13px; font-weight: 500;")
-        self.status_label.move(14, 17)
+        self.status_label.move(12, 17)
 
-        # Timer label (near status, shown during recording)
+        # Timer label (dynamically positioned after status text)
         self.timer_label = QLabel("", self.central)
         self.timer_label.setStyleSheet("color: rgba(255,255,255,0.8); font-size: 12px;")
-        self.timer_label.move(95, 18)
+        self.timer_label.move(100, 18)
         self.timer_label.hide()
 
         # Center record button
@@ -760,6 +760,10 @@ class MainWindow(QMainWindow):
             self._recording = True
             self._rec_start = time.time()
             self.status_label.setText("Слушаю")
+            self.status_label.adjustSize()
+            # Position timer after status text with some padding
+            status_width = self.status_label.width()
+            self.timer_label.move(12 + status_width + 8, 18)
             self.timer_label.setText("0.0s")
             self.timer_label.show()
             self.record_btn.set_recording(True)
@@ -788,7 +792,7 @@ class MainWindow(QMainWindow):
         with open("debug.log", "a") as f:
             f.write(f"[DEBUG] Starting transcription. Audio duration: {duration:.2f}s, samples: {len(audio)}\n")
 
-        self.status_label.setText("Обработка...")
+        self.status_label.setText("Текст...")
         self._thread = TranscriptionThread(self.transcriber, audio, self.config.sample_rate)
         self._thread.finished.connect(self._done)
         self._thread.error.connect(self._error)
