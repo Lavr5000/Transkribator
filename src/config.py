@@ -26,6 +26,8 @@ class Config:
     # Audio settings
     sample_rate: int = 16000
     channels: int = 1
+    audio_device: int = -1  # -1 = system default, or specific device index
+    mic_boost: float = 20.0  # Software gain multiplier (increase if mic is too quiet)
 
     # Hotkey settings
     hotkey: str = "ctrl+shift+space"  # Global hotkey to start/stop recording

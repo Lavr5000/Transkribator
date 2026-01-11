@@ -22,11 +22,15 @@ class AudioRecorder:
         self,
         sample_rate: int = 16000,
         channels: int = 1,
-        on_level_update: Optional[Callable[[float], None]] = None
+        on_level_update: Optional[Callable[[float], None]] = None,
+        device: Optional[int] = None,
+        mic_boost: float = 1.0  # Software gain multiplier (1.0 = no boost, 10.0 = 10x boost)
     ):
         self.sample_rate = sample_rate
         self.channels = channels
         self.on_level_update = on_level_update
+        self.device = device
+        self.mic_boost = mic_boost
 
         self._recording = False
         self._audio_queue: queue.Queue = queue.Queue()
@@ -62,12 +66,16 @@ class AudioRecorder:
                 self._audio_data = []
                 self._audio_queue = queue.Queue()
 
+                # Prepare device parameter (None = system default)
+                device_param = None if self.device == -1 else self.device
+
                 self._stream = sd.InputStream(
                     samplerate=self.sample_rate,
                     channels=self.channels,
                     dtype=np.float32,
                     callback=self._audio_callback,
-                    blocksize=1024
+                    blocksize=1024,
+                    device=device_param
                 )
                 self._stream.start()
                 self._recording = True
@@ -119,6 +127,13 @@ class AudioRecorder:
 
             # Concatenate all audio data
             audio = np.concatenate(self._audio_data, axis=0)
+
+            # Apply software boost if needed
+            if self.mic_boost != 1.0:
+                audio = audio * self.mic_boost
+                # Clip to prevent distortion
+                audio = np.clip(audio, -1.0, 1.0)
+
             return audio
 
     def save_to_file(self, audio: np.ndarray, filepath: Optional[Path] = None) -> Path:
