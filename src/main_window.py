@@ -590,7 +590,9 @@ class MainWindow(QMainWindow):
         self.recorder = AudioRecorder(
             sample_rate=self.config.sample_rate,
             channels=self.config.channels,
-            on_level_update=self._on_audio_level
+            on_level_update=self._on_audio_level,
+            device=self.config.audio_device if self.config.audio_device != -1 else None,
+            mic_boost=self.config.mic_boost
         )
         self.transcriber = Transcriber(
             backend=self.config.backend,
