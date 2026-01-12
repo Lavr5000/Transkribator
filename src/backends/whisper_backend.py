@@ -162,9 +162,9 @@ class WhisperBackend(BaseBackend):
                 segments, info = self._model.transcribe(
                     audio,
                     language=language,
-                    beam_size=5,
+                    beam_size=1,  # Faster than 5, minimal quality loss
                     vad_filter=True,
-                    vad_parameters=dict(min_silence_duration_ms=500)
+                    vad_parameters=dict(min_silence_duration_ms=200)  # Faster silence detection
                 )
                 text = " ".join([segment.text for segment in segments]).strip()
 
