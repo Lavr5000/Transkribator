@@ -365,6 +365,99 @@ class GradientWidget(QWidget):
         painter.drawRoundedRect(self.rect(), 12, 12)
 
 
+class TextPopup(QWidget):
+    """Всплывающая панель с текстом транскрибации - появляется сверху на 5 секунд."""
+
+    copy_requested = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._text = ""
+        self._setup_ui()
+
+        # Таймер автоскрытия
+        self._hide_timer = QTimer()
+        self._hide_timer.timeout.connect(self.hide)
+        self._hide_timer.setSingleShot(True)
+
+    def _setup_ui(self):
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowStaysOnTopHint |
+            Qt.WindowType.Tool
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFixedWidth(COMPACT_WIDTH)
+        self.setMinimumHeight(60)
+        self.setMaximumHeight(120)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Градиентный фон как у главного окна
+        gradient = QLinearGradient(0, 0, self.width(), 0)
+        gradient.setColorAt(0.0, QColor(GRADIENT_COLORS['left']))
+        gradient.setColorAt(0.5, QColor(GRADIENT_COLORS['middle']))
+        gradient.setColorAt(1.0, QColor(GRADIENT_COLORS['right']))
+
+        painter.setBrush(QBrush(gradient))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(self.rect(), 12, 12)
+
+        # Текст
+        if self._text:
+            painter.setPen(QPen(QColor(255, 255, 255, 230)))
+            font = painter.font()
+            font.setPointSize(11)
+            painter.setFont(font)
+
+            # Отступы
+            text_rect = self.rect().adjusted(12, 8, -40, -8)
+            painter.drawText(text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextWordWrap, self._text)
+
+        # Кнопка копирования (справа)
+        copy_btn_x = self.width() - 30
+        copy_btn_y = (self.height() - 18) // 2
+
+        painter.setPen(QPen(QColor(255, 255, 255, 200), 1.5))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(QRectF(copy_btn_x, copy_btn_y + 2, 8, 10), 1, 1)
+        painter.drawRoundedRect(QRectF(copy_btn_x + 4, copy_btn_y, 8, 10), 1, 1)
+
+    def set_text(self, text: str):
+        """Установить текст и показать панель."""
+        self._text = text
+
+        # Рассчитываем высоту на основе текста
+        font_metrics = self.fontMetrics()
+        text_width = COMPACT_WIDTH - 52  # отступы
+        lines = max(1, len(text) // 40 + 1)  # примерная оценка строк
+        height = min(120, max(60, 30 + lines * 20))
+        self.setFixedHeight(height)
+
+        self.update()
+
+    def get_text(self) -> str:
+        return self._text
+
+    def show_with_timeout(self, timeout_ms: int = 5000):
+        """Показать панель с автоскрытием через указанное время."""
+        self._hide_timer.stop()
+        self.show()
+        self._hide_timer.start(timeout_ms)
+
+    def mousePressEvent(self, event):
+        # Проверяем клик на кнопке копирования
+        copy_btn_x = self.width() - 35
+        if event.pos().x() >= copy_btn_x:
+            self.copy_requested.emit()
+        else:
+            # Закрываем при клике в любом другом месте
+            self._hide_timer.stop()
+            self.hide()
+
+
 class SettingsDialog(QDialog):
     def __init__(self, parent=None, config=None, history_manager=None):
         super().__init__(parent)
@@ -409,33 +502,8 @@ class SettingsDialog(QDialog):
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
 
-        self._create_transcription_tab()
         self._create_settings_tab()
         self._create_history_tab()
-
-    def _create_transcription_tab(self):
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-
-        self.text_edit = QTextEdit()
-        self.text_edit.setPlaceholderText("Транскрибированный текст...")
-        layout.addWidget(self.text_edit)
-
-        self.status_label = QLabel("Готово")
-        self.status_label.setStyleSheet(f"color: {COLORS['text_secondary']};")
-        layout.addWidget(self.status_label)
-
-        btn_layout = QHBoxLayout()
-        self.copy_btn = QPushButton("Копировать")
-        self.copy_btn.clicked.connect(self._copy_text)
-        btn_layout.addWidget(self.copy_btn)
-
-        self.clear_btn = QPushButton("Очистить")
-        self.clear_btn.clicked.connect(lambda: self.text_edit.clear())
-        btn_layout.addWidget(self.clear_btn)
-
-        layout.addLayout(btn_layout)
-        self.tabs.addTab(tab, "Текст")
 
     def _create_settings_tab(self):
         tab = QWidget()
@@ -556,14 +624,6 @@ class SettingsDialog(QDialog):
             self.history_manager.clear_history()
             self._update_history_display()
 
-    def _copy_text(self):
-        if CLIPBOARD_AVAILABLE:
-            try:
-                pyperclip.copy(self.text_edit.toPlainText())
-                self.status_label.setText("Скопировано!")
-            except:
-                pass
-
     def update_stats_display(self):
         if self.config:
             self.stats_words.setText(f"Слов: {self.config.total_words:,}")
@@ -608,14 +668,19 @@ class MainWindow(QMainWindow):
 
         self._thread: Optional[TranscriptionThread] = None
         self._rec_start = 0.0
+        self._rec_duration = 0.0  # Длительность записи
+        self._transcription_start = 0.0  # Время начала транскрибации
         self._drag_pos = None
         self._settings = None
         self._recording = False
+        self._processing = False  # Защита от повторных вызовов во время обработки
+        self._last_toggle_time = 0.0  # Для debounce
         self._last_text = ""
         self._hover = False
 
         self._setup_ui()
         self._setup_tray()
+        self._setup_text_popup()
         self._connect_signals()
         self.hotkey_manager.register(self.config.hotkey)
         # Preload model immediately (in background thread) to eliminate cold start
@@ -635,15 +700,17 @@ class MainWindow(QMainWindow):
         self.central.setMouseTracking(True)
         self.setCentralWidget(self.central)
 
-        # Status label (left)
+        # Status label (left) - фиксированная ширина для всех статусов
         self.status_label = QLabel("Готово", self.central)
         self.status_label.setStyleSheet("color: white; font-size: 13px; font-weight: 500;")
+        self.status_label.setFixedWidth(95)  # Достаточно для "Обработка..."
         self.status_label.move(12, 17)
 
-        # Timer label (dynamically positioned after status text)
+        # Timer label - позиционируется справа от status_label
         self.timer_label = QLabel("", self.central)
-        self.timer_label.setStyleSheet("color: rgba(255,255,255,0.8); font-size: 12px;")
-        self.timer_label.move(100, 18)
+        self.timer_label.setStyleSheet("color: rgba(255,255,255,0.8); font-size: 11px;")
+        self.timer_label.setFixedWidth(75)  # Для "99.9 с → 9.9 с"
+        self.timer_label.move(105, 18)  # 12 + 93 = 105
         self.timer_label.hide()
 
         # Center record button
@@ -715,6 +782,32 @@ class MainWindow(QMainWindow):
         self.tray.activated.connect(self._tray_click)
         self.tray.show()
 
+    def _setup_text_popup(self):
+        """Создаём всплывающую панель для отображения текста."""
+        self._text_popup = TextPopup()
+        self._text_popup.copy_requested.connect(self._copy_from_popup)
+        self._text_popup.hide()
+
+    def _copy_from_popup(self):
+        """Копировать текст из всплывающей панели."""
+        text = self._text_popup.get_text()
+        if text and CLIPBOARD_AVAILABLE:
+            try:
+                pyperclip.copy(text)
+                self.status_label.setText("Скопировано!")
+                QTimer.singleShot(1500, lambda: self.status_label.setText("Готово") if not self._recording else None)
+            except:
+                pass
+
+    def _show_text_popup(self, text: str):
+        """Показать всплывающую панель с текстом сверху окна."""
+        self._text_popup.set_text(text)
+        # Позиционируем сверху главного окна
+        main_pos = self.pos()
+        popup_height = self._text_popup.height()
+        self._text_popup.move(main_pos.x(), main_pos.y() - popup_height - 10)
+        self._text_popup.show_with_timeout(5000)
+
     def _connect_signals(self):
         self.status_update.connect(self._set_status)
         self.audio_level_update.connect(self._set_level)
@@ -732,6 +825,16 @@ class MainWindow(QMainWindow):
         self._toggle_recording()
 
     def _toggle_recording(self):
+        # Debounce: игнорируем вызовы чаще чем раз в 300мс
+        current_time = time.time()
+        if current_time - self._last_toggle_time < 0.3:
+            return
+        self._last_toggle_time = current_time
+
+        # Защита от повторных вызовов во время обработки транскрибации
+        if self._processing:
+            return
+
         if self._recording:
             self._stop()
         else:
@@ -742,7 +845,7 @@ class MainWindow(QMainWindow):
             self._recording = True
             self._rec_start = time.time()
             self.status_label.setText("Слушаю")
-            self.timer_label.setText("0.0s")
+            self.timer_label.setText("0.0 с")
             self.timer_label.show()
             self.record_btn.set_recording(True)
             self._rec_timer.start(100)
@@ -750,7 +853,12 @@ class MainWindow(QMainWindow):
 
     def _stop(self):
         self._recording = False
+        self._processing = True  # Блокируем повторные вызовы
         self._rec_timer.stop()
+
+        # Сохраняем время записи
+        self._rec_duration = time.time() - self._rec_start
+
         audio = self.recorder.stop()
 
         self.timer_label.hide()
@@ -759,28 +867,37 @@ class MainWindow(QMainWindow):
 
         if audio is None or len(audio) == 0 or self.recorder.get_duration(audio) < 0.5:
             self.status_label.setText("Готово")
+            self._processing = False  # Разблокируем
             return
 
         self.status_label.setText("Обработка...")
+        self._transcription_start = time.time()  # Фиксируем начало транскрибации
         self._thread = TranscriptionThread(self.transcriber, audio, self.config.sample_rate)
         self._thread.finished.connect(self._done)
         self._thread.error.connect(self._error)
         self._thread.start()
 
     def _update_timer(self):
-        self.timer_label.setText(f"{time.time() - self._rec_start:.1f}s")
+        self.timer_label.setText(f"{time.time() - self._rec_start:.1f} с")
 
     def _done(self, text, duration):
+        self._processing = False  # Разблокируем
         self._last_text = text
+
+        # Вычисляем время транскрибации
+        transcription_time = time.time() - self._transcription_start
+
+        # Показываем время записи → время транскрибации на 2 секунды
         self.status_label.setText("Готово")
+        self.timer_label.setText(f"{self._rec_duration:.1f} с → {transcription_time:.1f} с")
+        self.timer_label.show()
+        QTimer.singleShot(2000, self._hide_timer_after_done)
 
         if self._settings and self._settings.isVisible():
-            self._settings.text_edit.setPlainText(text)
-            self._settings.status_label.setText(f"Готово ({duration:.1f}с)")
             self._settings.update_stats_display()
             self._settings._update_history_display()
 
-        self.config.update_stats(len(text.split()), time.time() - self._rec_start)
+        self.config.update_stats(len(text.split()), self._rec_duration)
         self.history_manager.add_entry(text, duration, self.config.backend, self.config.model_size)
 
         if self.config.auto_copy and CLIPBOARD_AVAILABLE:
@@ -788,10 +905,20 @@ class MainWindow(QMainWindow):
                 pyperclip.copy(text)
             except:
                 pass
-        if self.config.auto_paste:
+
+        # Если auto_paste отключен - показываем всплывающую панель с текстом
+        if not self.config.auto_paste:
+            self._show_text_popup(text)
+        else:
             QTimer.singleShot(100, lambda: self._type(text))
 
+    def _hide_timer_after_done(self):
+        """Скрыть таймер после показа результата."""
+        if not self._recording:
+            self.timer_label.hide()
+
     def _error(self, err):
+        self._processing = False  # Разблокируем
         self.status_label.setText("Ошибка")
 
     def _type(self, text):
@@ -808,9 +935,11 @@ class MainWindow(QMainWindow):
             self.record_btn.set_audio_level(level)
 
     def _copy_last(self):
-        if self._last_text and CLIPBOARD_AVAILABLE:
+        # Приоритет: текст из popup, затем _last_text
+        text = self._text_popup.get_text() if self._text_popup.get_text() else self._last_text
+        if text and CLIPBOARD_AVAILABLE:
             try:
-                pyperclip.copy(self._last_text)
+                pyperclip.copy(text)
                 self.status_label.setText("Скопировано!")
                 QTimer.singleShot(1500, lambda: self.status_label.setText("Готово") if not self._recording else None)
             except:
@@ -819,7 +948,7 @@ class MainWindow(QMainWindow):
     def _show_history(self):
         self._show_settings()
         if self._settings:
-            self._settings.tabs.setCurrentIndex(2)
+            self._settings.tabs.setCurrentIndex(1)
 
     def _show_settings(self):
         if not self._settings:
