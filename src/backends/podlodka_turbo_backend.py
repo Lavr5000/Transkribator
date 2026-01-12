@@ -8,10 +8,17 @@ import numpy as np
 from .base import BaseBackend
 
 try:
-    from faster_whisper import WhisperModel
-    FASTER_WHISPER_AVAILABLE = True
+    from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
+    import torch
+    TRANSFORMERS_AVAILABLE = True
 except ImportError:
-    FASTER_WHISPER_AVAILABLE = False
+    TRANSFORMERS_AVAILABLE = False
+
+try:
+    import scipy.signal
+    SCIPY_AVAILABLE = True
+except ImportError:
+    SCIPY_AVAILABLE = False
 
 
 class PodlodkaTurboBackend(BaseBackend):
@@ -32,43 +39,36 @@ class PodlodkaTurboBackend(BaseBackend):
     ):
         super().__init__(model_size, device, compute_type, language, on_progress)
         self._model = None
+        self._processor = None
         self._loading = False
         self._lock = threading.Lock()
         self._detected_device = device
-        self._detected_compute_type = compute_type
+        self._dtype = "float32"
 
         # Force Russian for Podlodka-Turbo
         self.language = "ru"
 
     def _detect_device(self) -> Tuple[str, str]:
-        """Detect the best device and compute type."""
+        """Detect the best device and dtype."""
         device = self.device
-        compute_type = self.compute_type
+        dtype = self._dtype
 
         if device == "auto":
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    device = "cuda"
-                else:
-                    device = "cpu"
-            except ImportError:
-                device = "cpu"
-
-        if compute_type == "auto":
-            if device == "cuda":
-                compute_type = "float16"
+            if torch.cuda.is_available():
+                device = "cuda"
+                dtype = "float16"
             else:
-                compute_type = "int8"
+                device = "cpu"
+                dtype = "float32"
 
-        return device, compute_type
+        return device, dtype
 
     def load_model(self):
-        """Load the Whisper-Podlodka-Turbo model."""
-        if not FASTER_WHISPER_AVAILABLE:
+        """Load the Whisper-Podlodka-Turbo model using transformers."""
+        if not TRANSFORMERS_AVAILABLE:
             if self.on_progress:
-                self.on_progress("Error: faster-whisper not installed")
-            raise RuntimeError("faster-whisper not installed")
+                self.on_progress("Error: transformers not installed")
+            raise RuntimeError("transformers not installed. Install: pip install transformers torch")
 
         with self._lock:
             if self._model is not None:
@@ -83,18 +83,23 @@ class PodlodkaTurboBackend(BaseBackend):
             if self.on_progress:
                 self.on_progress("Loading Whisper-Podlodka-Turbo model (Russian fine-tuned)...")
 
-            device, compute_type = self._detect_device()
+            device, dtype = self._detect_device()
             self._detected_device = device
-            self._detected_compute_type = compute_type
+            self._dtype = dtype
 
-            # Load Podlodka-Turbo model from HuggingFace
-            model_path = "bond005/whisper-podlodka-turbo"
+            model_id = "bond005/whisper-podlodka-turbo"
 
-            self._model = WhisperModel(
-                model_path,
-                device=device,
-                compute_type=compute_type
-            )
+            # Load model
+            torch_dtype = getattr(torch, dtype)
+            self._model = AutoModelForSpeechSeq2Seq.from_pretrained(
+                model_id,
+                torch_dtype=torch_dtype,
+                low_cpu_mem_usage=True,
+                use_safetensors=True
+            ).to(device)
+
+            # Load processor
+            self._processor = AutoProcessor.from_pretrained(model_id)
 
             if self.on_progress:
                 self.on_progress(f"Whisper-Podlodka-Turbo loaded ({device})")
@@ -110,12 +115,12 @@ class PodlodkaTurboBackend(BaseBackend):
         """Unload the model to free memory."""
         with self._lock:
             self._model = None
+            self._processor = None
             gc.collect()
             try:
-                import torch
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
-            except ImportError:
+            except:
                 pass
 
         if self.on_progress:
@@ -154,22 +159,39 @@ class PodlodkaTurboBackend(BaseBackend):
 
             # Resample if necessary
             if sample_rate != 16000:
-                try:
-                    import scipy.signal
+                if SCIPY_AVAILABLE:
                     num_samples = int(len(audio) * 16000 / sample_rate)
                     audio = scipy.signal.resample(audio, num_samples)
-                except ImportError:
-                    pass
+                else:
+                    # Simple linear interpolation
+                    import math
+                    ratio = 16000 / sample_rate
+                    num_samples = int(len(audio) * ratio)
+                    indices = np.linspace(0, len(audio) - 1, num_samples)
+                    audio = np.interp(indices, np.arange(len(audio)), audio)
 
-            # Transcribe with Russian language specified
-            segments, info = self._model.transcribe(
+            # Prepare input
+            inputs = self._processor(
                 audio,
-                language="ru",  # Force Russian
-                beam_size=5,
-                vad_filter=True,
-                vad_parameters=dict(min_silence_duration_ms=500)
-            )
-            text = " ".join([segment.text for segment in segments]).strip()
+                sampling_rate=16000,
+                return_tensors="pt"
+            ).to(self._model.device)
+
+            # Generate transcription
+            with torch.no_grad():
+                predicted_ids = self._model.generate(
+                    **inputs,
+                    language="ru",
+                    task="transcribe",
+                    do_sample=False,
+                    temperature=1.0,
+                )
+
+            # Decode
+            text = self._processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
+
+            # Clean up text
+            text = text.strip()
 
             process_time = time.time() - start_time
 
@@ -181,6 +203,8 @@ class PodlodkaTurboBackend(BaseBackend):
         except Exception as e:
             if self.on_progress:
                 self.on_progress(f"Podlodka-Turbo error: {e}")
+            import traceback
+            traceback.print_exc()
             return "", 0.0
 
     def is_model_loaded(self) -> bool:
@@ -191,9 +215,9 @@ class PodlodkaTurboBackend(BaseBackend):
         """Get information about the current model."""
         info = super().get_model_info()
         info.update({
-            "whisper_backend": "faster-whisper (podlodka-turbo)",
+            "whisper_backend": "transformers (podlodka-turbo)",
             "detected_device": self._detected_device,
-            "detected_compute_type": self._detected_compute_type,
+            "dtype": self._dtype,
             "model_source": "HuggingFace: bond005/whisper-podlodka-turbo",
             "language": "ru (Russian fine-tuned)",
         })

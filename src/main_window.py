@@ -17,6 +17,7 @@ from PyQt6.QtGui import (
     QPainter, QLinearGradient, QBrush, QPen, QMouseEvent,
     QPainterPath
 )
+from PyQt6 import sip
 
 from .config import Config, WHISPER_MODELS, SHERPA_MODELS, PODLODKA_MODELS, LANGUAGES, BACKENDS
 from .audio_recorder import AudioRecorder
@@ -703,14 +704,14 @@ class MainWindow(QMainWindow):
         # Status label (left) - фиксированная ширина для всех статусов
         self.status_label = QLabel("Готово", self.central)
         self.status_label.setStyleSheet("color: white; font-size: 13px; font-weight: 500;")
-        self.status_label.setFixedWidth(95)  # Достаточно для "Обработка..."
+        self.status_label.setFixedWidth(85)  # Для "Готово", "Слушаю", "Обработка..."
         self.status_label.move(12, 17)
 
-        # Timer label - позиционируется справа от status_label
+        # Timer label - позиционируется слева, чтобы не перекрывать кнопку записи
         self.timer_label = QLabel("", self.central)
-        self.timer_label.setStyleSheet("color: rgba(255,255,255,0.8); font-size: 11px;")
-        self.timer_label.setFixedWidth(75)  # Для "99.9 с → 9.9 с"
-        self.timer_label.move(105, 18)  # 12 + 93 = 105
+        self.timer_label.setStyleSheet("color: rgba(255,255,255,0.8); font-size: 10px;")
+        self.timer_label.setFixedWidth(55)  # Компактный "9.9→9.9с"
+        self.timer_label.move(95, 18)  # Слева от кнопки записи (95-150)
         self.timer_label.hide()
 
         # Center record button
@@ -801,12 +802,26 @@ class MainWindow(QMainWindow):
 
     def _show_text_popup(self, text: str):
         """Показать всплывающую панель с текстом сверху окна."""
+        if not text:
+            return
+
         self._text_popup.set_text(text)
         # Позиционируем сверху главного окна
         main_pos = self.pos()
         popup_height = self._text_popup.height()
-        self._text_popup.move(main_pos.x(), main_pos.y() - popup_height - 10)
+
+        # Проверяем что popup не уйдет за верх экрана
+        screen_geometry = QApplication.screenAt(main_pos).geometry()
+        popup_y = main_pos.y() - popup_height - 10
+        if popup_y < screen_geometry.top() + 50:
+            # Если не помещается сверху, показываем снизу
+            popup_y = main_pos.y() + self.height() + 10
+
+        self._text_popup.move(main_pos.x(), popup_y)
         self._text_popup.show_with_timeout(5000)
+
+        # Также Raise для гарантии что окно сверху
+        self._text_popup.raise_()
 
     def _connect_signals(self):
         self.status_update.connect(self._set_status)
@@ -816,7 +831,12 @@ class MainWindow(QMainWindow):
         threading.Thread(target=self.transcriber.load_model, daemon=True).start()
 
     def _on_audio_level(self, level):
-        self.audio_level_update.emit(min(1.0, level * 10))
+        try:
+            # Проверяем что окно ещё существует
+            if not sip.isdeleted(self):
+                self.audio_level_update.emit(min(1.0, level * 10))
+        except:
+            pass
 
     def _on_progress(self, msg):
         self.status_update.emit(msg)
@@ -845,7 +865,7 @@ class MainWindow(QMainWindow):
             self._recording = True
             self._rec_start = time.time()
             self.status_label.setText("Слушаю")
-            self.timer_label.setText("0.0 с")
+            self.timer_label.setText("0.0с")
             self.timer_label.show()
             self.record_btn.set_recording(True)
             self._rec_timer.start(100)
@@ -878,7 +898,7 @@ class MainWindow(QMainWindow):
         self._thread.start()
 
     def _update_timer(self):
-        self.timer_label.setText(f"{time.time() - self._rec_start:.1f} с")
+        self.timer_label.setText(f"{time.time() - self._rec_start:.1f}с")
 
     def _done(self, text, duration):
         self._processing = False  # Разблокируем
@@ -889,7 +909,7 @@ class MainWindow(QMainWindow):
 
         # Показываем время записи → время транскрибации на 2 секунды
         self.status_label.setText("Готово")
-        self.timer_label.setText(f"{self._rec_duration:.1f} с → {transcription_time:.1f} с")
+        self.timer_label.setText(f"{self._rec_duration:.1f}→{transcription_time:.1f}с")
         self.timer_label.show()
         QTimer.singleShot(2000, self._hide_timer_after_done)
 
