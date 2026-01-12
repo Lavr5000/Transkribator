@@ -410,7 +410,7 @@ class TextPopup(QWidget):
         if self._text:
             painter.setPen(QPen(QColor(255, 255, 255, 230)))
             font = painter.font()
-            font.setPointSize(11)
+            font.setPointSize(10)  # Уменьшен с 11 до 10
             painter.setFont(font)
 
             # Отступы
@@ -950,16 +950,18 @@ class MainWindow(QMainWindow):
         self.config.update_stats(len(text.split()), self._rec_duration)
         self.history_manager.add_entry(text, duration, self.config.backend, self.config.model_size)
 
+        # Авто-копирование в буфер обмена
         if self.config.auto_copy and CLIPBOARD_AVAILABLE:
             try:
                 pyperclip.copy(text)
             except:
                 pass
 
-        # Если auto_paste отключен - показываем всплывающую панель с текстом
-        if not self.config.auto_paste:
-            self._show_text_popup(text)
-        else:
+        # Показываем всплывающую панель с текстом ВСЕГДА
+        self._show_text_popup(text)
+
+        # Авто-вставка текста если включено
+        if self.config.auto_paste:
             QTimer.singleShot(100, lambda: self._type(text))
 
         with open("debug.log", "a") as f:
