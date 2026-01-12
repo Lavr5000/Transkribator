@@ -19,11 +19,12 @@ from PyQt6.QtGui import (
 )
 from PyQt6 import sip
 
-from .config import Config, WHISPER_MODELS, SHERPA_MODELS, PODLODKA_MODELS, LANGUAGES, BACKENDS
+from .config import Config, WHISPER_MODELS, SHERPA_MODELS, PODLODKA_MODELS, LANGUAGES, BACKENDS, MOUSE_BUTTONS
 from .audio_recorder import AudioRecorder
 from .transcriber import Transcriber, get_available_backends
 from .hotkeys import HotkeyManager, type_text
 from .history_manager import HistoryManager
+from .mouse_handler import MouseButtonHandler
 
 try:
     import pyperclip
@@ -628,6 +629,28 @@ class SettingsDialog(QDialog):
         behavior_layout.addWidget(self.always_top_cb)
         behavior_layout.addWidget(self.post_process_cb)
         scroll_layout.addWidget(behavior_group)
+
+        # Mouse button group
+        mouse_group = QGroupBox("Кнопка мыши")
+        mouse_layout = QVBoxLayout(mouse_group)
+
+        # Enable checkbox
+        self.enable_mouse_button_cb = QCheckBox("Использовать кнопку мыши для записи")
+        if self.config:
+            self.enable_mouse_button_cb.setChecked(self.config.enable_mouse_button)
+        mouse_layout.addWidget(self.enable_mouse_button_cb)
+
+        # Button selection
+        self.mouse_button_combo = QComboBox()
+        for bid, bname in MOUSE_BUTTONS.items():
+            self.mouse_button_combo.addItem(bname, bid)
+        if self.config and self.config.mouse_button in MOUSE_BUTTONS:
+            self.mouse_button_combo.setCurrentIndex(
+                list(MOUSE_BUTTONS.keys()).index(self.config.mouse_button)
+            )
+        mouse_layout.addWidget(self.mouse_button_combo)
+
+        scroll_layout.addWidget(mouse_group)
         scroll_layout.addStretch()
 
         scroll.setWidget(content)
@@ -733,6 +756,12 @@ class MainWindow(QMainWindow):
         self.hotkey_manager = HotkeyManager(on_hotkey=self._on_hotkey)
         self.history_manager = HistoryManager(max_entries=50)
 
+        # Initialize mouse button handler
+        self.mouse_handler = MouseButtonHandler(
+            button=self.config.mouse_button,
+            on_click=self._on_mouse_click
+        )
+
         self._thread: Optional[TranscriptionThread] = None
         self._rec_start = 0.0
         self._rec_duration = 0.0  # Длительность записи
@@ -750,6 +779,15 @@ class MainWindow(QMainWindow):
         self._setup_text_popup()
         self._connect_signals()
         self.hotkey_manager.register(self.config.hotkey)
+
+        # Start mouse handler if enabled
+        if self.config.enable_mouse_button:
+            try:
+                self.mouse_handler.start()
+            except Exception:
+                # Silently fail if pynput is not available
+                pass
+
         # Preload model immediately (in background thread) to eliminate cold start
         QTimer.singleShot(100, self._load_model)
 
@@ -921,6 +959,10 @@ class MainWindow(QMainWindow):
     def _on_hotkey(self):
         self._toggle_recording()
 
+    def _on_mouse_click(self):
+        """Обработка нажатия кнопки мыши для записи."""
+        self._toggle_recording()
+
     def _toggle_recording(self):
         # Защита от повторных вызовов во время обработки транскрибации
         if self._processing:
@@ -1041,7 +1083,9 @@ class MainWindow(QMainWindow):
             f.write(f"[DEBUG] _cancel_recording(): recording cancelled\n")
 
     def _update_timer(self):
-        self.timer_label.setText(f"{time.time() - self._rec_start:.1f}с")
+        elapsed = time.time() - self._rec_start
+        self.timer_label.setText(f"{elapsed:.1f}с")
+        self.timer_label.repaint()  # Force UI update
 
     def _done(self, text, duration):
         with open("debug.log", "a") as f:
@@ -1139,6 +1183,8 @@ class MainWindow(QMainWindow):
             self._settings.auto_paste_cb.toggled.connect(lambda c: setattr(self.config, 'auto_paste', c) or self.config.save())
             self._settings.always_top_cb.toggled.connect(self._top_changed)
             self._settings.post_process_cb.toggled.connect(self._post_changed)
+            self._settings.enable_mouse_button_cb.toggled.connect(self._on_mouse_setting_changed)
+            self._settings.mouse_button_combo.currentIndexChanged.connect(self._on_mouse_setting_changed)
 
         self._settings.move(self.pos().x(), self.pos().y() + self.height() + 10)
         self._settings.show()
@@ -1183,6 +1229,23 @@ class MainWindow(QMainWindow):
         self.config.save()
         self.transcriber.enable_post_processing = checked
 
+    def _on_mouse_setting_changed(self, value=None):
+        """Обновить настройку мыши и перезапустить обработчик."""
+        # Update config from UI
+        self.config.enable_mouse_button = self._settings.enable_mouse_button_cb.isChecked()
+        self.config.mouse_button = self._settings.mouse_button_combo.currentData()
+        self.config.save()
+
+        # Restart mouse handler with new settings
+        self.mouse_handler.stop()
+        if self.config.enable_mouse_button:
+            self.mouse_handler.button = self.config.mouse_button
+            try:
+                self.mouse_handler.start()
+            except Exception as e:
+                # Silently fail if pynput is not available
+                pass
+
     def _tray_click(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             self.show() if not self.isVisible() else self.hide()
@@ -1201,6 +1264,7 @@ class MainWindow(QMainWindow):
 
     def _quit(self):
         self.hotkey_manager.unregister()
+        self.mouse_handler.stop()
         self.tray.hide()
         self.config.save()
         QApplication.quit()
