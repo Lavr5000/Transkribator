@@ -32,22 +32,23 @@ except ImportError:
     CLIPBOARD_AVAILABLE = False
 
 
-# Gradient colors
+# Brand gradient colors (AI vibes style)
 GRADIENT_COLORS = {
-    'left': '#e85d04',
-    'middle': '#d63384',
-    'right': '#7c3aed',
+    'left': '#6366f1',    # Indigo
+    'middle': '#8b5cf6',  # Violet
+    'right': '#ec4899',   # Pink
 }
 
 COLORS = {
-    'bg_dark': '#1a1a2e',
-    'bg_medium': '#16213e',
-    'bg_light': '#0f3460',
-    'accent': '#ec4899',
-    'text_primary': '#ffffff',
-    'text_secondary': '#a0a0a0',
-    'success': '#10b981',
-    'border': '#2d2d44',
+    'bg_dark': '#0f0f1a',      # Darker background
+    'bg_medium': '#1a1a2e',    # Medium background
+    'bg_light': '#2d2d44',     # Lighter background
+    'accent': '#8b5cf6',       # Violet accent
+    'text_primary': '#ffffff', # White text
+    'text_secondary': '#a0a0b0', # Soft gray text
+    'success': '#10b981',      # Green
+    'border': '#3d3d5c',       # Softer border
+    'telegram': '#0088cc',     # Telegram blue
 }
 
 COMPACT_HEIGHT = 52
@@ -366,6 +367,62 @@ class CancelButton(MiniButton):
         # Draw thicker X
         painter.drawLine(QPoint(4, 4), QPoint(14, 14))
         painter.drawLine(QPoint(14, 4), QPoint(4, 14))
+
+
+class TelegramLink(QWidget):
+    """Ссылка на Telegram канал с логотипом."""
+    clicked = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(160, 18)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._hover = False
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Telegram blue color
+        tg_color = QColor(COLORS['telegram'])
+        if self._hover:
+            tg_color = tg_color.lighter(120)
+
+        # Draw Telegram plane icon (simplified)
+        painter.setPen(QPen(tg_color, 1.5))
+        painter.setBrush(QBrush(tg_color))
+
+        # Simple paper plane shape
+        plane_path = QPainterPath()
+        plane_path.moveTo(8, 6)
+        plane_path.lineTo(14, 10)
+        plane_path.lineTo(8, 14)
+        plane_path.lineTo(10, 10)
+        plane_path.closeSubpath()
+
+        # Draw plane
+        painter.drawPath(plane_path)
+
+        # Draw text "@ai_vibes_coding_ru"
+        painter.setPen(QColor(255, 255, 255, 180))
+        font = painter.font()
+        font.setPointSize(7)
+        painter.setFont(font)
+
+        text_rect = self.rect().adjusted(18, 0, 0, 0)
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, "@ai_vibes_coding_ru")
+
+    def enterEvent(self, event):
+        self._hover = True
+        self.update()
+
+    def leaveEvent(self, event):
+        self._hover = False
+        self.update()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
 
 
 class GradientWidget(QWidget):
@@ -766,6 +823,11 @@ class MainWindow(QMainWindow):
         self._corner_btns = [self.copy_btn, self.settings_btn, self.close_btn]
         self._set_corner_opacity(0.0)
 
+        # Telegram link (bottom-right, below close button)
+        self.telegram_link = TelegramLink(self.central)
+        self.telegram_link.move(COMPACT_WIDTH - 165, COMPACT_HEIGHT - 21)
+        self.telegram_link.clicked.connect(self._open_telegram_channel)
+
         # Recording timer
         self._rec_timer = QTimer()
         self._rec_timer.timeout.connect(self._update_timer)
@@ -1155,6 +1217,11 @@ class MainWindow(QMainWindow):
         self.tray.hide()
         self.config.save()
         QApplication.quit()
+
+    def _open_telegram_channel(self):
+        """Open the Telegram channel in browser."""
+        import webbrowser
+        webbrowser.open("https://t.me/ai_vibes_coding_ru")
 
 
 def run():
