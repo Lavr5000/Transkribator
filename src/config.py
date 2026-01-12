@@ -66,16 +66,39 @@ class Config:
 
     @classmethod
     def load(cls) -> "Config":
-        """Load configuration from file."""
+        """Load configuration from file with validation."""
         config_path = cls.get_config_path()
         if config_path.exists():
             try:
                 with open(config_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                return cls(**data)
-            except (json.JSONDecodeError, TypeError):
+                # Валидация: оставляем только известные поля
+                valid_fields = {f.name for f in __import__('dataclasses').fields(cls)}
+                filtered_data = {k: v for k, v in data.items() if k in valid_fields}
+                config = cls(**filtered_data)
+                # Проверка критичных значений
+                config._validate()
+                return config
+            except (json.JSONDecodeError, TypeError, ValueError) as e:
+                # Повреждённый конфиг - используем дефолтный
                 pass
         return cls()
+
+    def _validate(self) -> None:
+        """Validate configuration values."""
+        # Валидация backend
+        if self.backend not in BACKENDS:
+            self.backend = "sherpa"
+        # Валидация sample_rate
+        if self.sample_rate not in (8000, 16000, 22050, 44100, 48000):
+            self.sample_rate = 16000
+        # Валидация mic_boost
+        if not (0.1 <= self.mic_boost <= 50.0):
+            self.mic_boost = 20.0
+        # Валидация статистики (не отрицательные)
+        self.total_words = max(0, self.total_words)
+        self.total_recordings = max(0, self.total_recordings)
+        self.total_seconds_saved = max(0.0, self.total_seconds_saved)
 
     def save(self) -> None:
         """Save configuration to file."""

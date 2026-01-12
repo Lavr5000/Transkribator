@@ -1,6 +1,9 @@
 """Global hotkey management for WhisperTyping."""
+import logging
 import threading
 from typing import Callable, Optional
+
+logger = logging.getLogger("whisper-typing")
 
 # Try keyboard first (better cross-platform support), fallback to pynput
 HOTKEY_BACKEND = None
@@ -37,7 +40,7 @@ class HotkeyManager:
             True if registration successful
         """
         if HOTKEY_BACKEND is None:
-            print("No hotkey backend available")
+            logger.warning("No hotkey backend available")
             return False
 
         # Unregister existing hotkey
@@ -70,7 +73,7 @@ class HotkeyManager:
                 return True
 
         except Exception as e:
-            print(f"Failed to register hotkey: {e}")
+            logger.error(f"Failed to register hotkey: {e}")
             return False
 
         return False
@@ -206,7 +209,7 @@ def type_text(text: str, interval: float = 0.0) -> None:
         try:
             keyboard.write(text, delay=interval)
         except Exception as e:
-            print(f"Failed to type text: {e}")
+            logger.error(f"Failed to type text: {e}")
 
     elif HOTKEY_BACKEND == "pynput":
         try:
@@ -218,4 +221,4 @@ def type_text(text: str, interval: float = 0.0) -> None:
                     import time
                     time.sleep(interval)
         except Exception as e:
-            print(f"Failed to type text: {e}")
+            logger.error(f"Failed to type text: {e}")

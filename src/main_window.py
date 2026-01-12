@@ -825,7 +825,7 @@ class MainWindow(QMainWindow):
                 pyperclip.copy(text)
                 self.status_label.setText("Скопировано!")
                 QTimer.singleShot(1500, lambda: self.status_label.setText("Готово") if not self._recording else None)
-            except:
+            except Exception:
                 pass
 
     def _show_text_popup(self, text: str):
@@ -863,7 +863,8 @@ class MainWindow(QMainWindow):
             # Проверяем что окно ещё существует
             if not sip.isdeleted(self):
                 self.audio_level_update.emit(min(1.0, level * 10))
-        except:
+        except RuntimeError:
+            # Окно было удалено, игнорируем
             pass
 
     def _on_progress(self, msg):
@@ -875,21 +876,14 @@ class MainWindow(QMainWindow):
     def _toggle_recording(self):
         # Защита от повторных вызовов во время обработки транскрибации
         if self._processing:
-            with open("debug.log", "a") as f:
-                f.write("[DEBUG] _toggle_recording BLOCKED by _processing flag\n")
             return
 
         # Debounce: блокируем только ПОВТОРНЫЙ запуск, не остановку!
         if not self._recording:
             current_time = time.time()
             if current_time - self._last_toggle_time < 0.3:
-                with open("debug.log", "a") as f:
-                    f.write(f"[DEBUG] _toggle_recording START BLOCKED by debounce ({current_time - self._last_toggle_time:.3f}s)\n")
                 return
             self._last_toggle_time = current_time
-
-        with open("debug.log", "a") as f:
-            f.write(f"[DEBUG] _toggle_recording: _recording={self._recording}, _processing={self._processing}\n")
 
         if self._recording:
             self._stop()
@@ -897,9 +891,6 @@ class MainWindow(QMainWindow):
             self._start()
 
     def _start(self):
-        with open("debug.log", "a") as f:
-            f.write(f"[DEBUG] _start() called, _recording={self._recording}, _processing={self._processing}\n")
-
         if self.recorder.start():
             self._recording = True
             self._rec_start = time.time()
@@ -915,16 +906,7 @@ class MainWindow(QMainWindow):
             self.cancel_btn.show()
             self.close_btn.hide()
 
-            with open("debug.log", "a") as f:
-                f.write(f"[DEBUG] _start() SUCCESS: recording started\n")
-        else:
-            with open("debug.log", "a") as f:
-                f.write(f"[DEBUG] _start() FAILED: recorder.start() returned False\n")
-
     def _stop(self):
-        with open("debug.log", "a") as f:
-            f.write(f"[DEBUG] _stop() called, _recording={self._recording}, _processing={self._processing}\n")
-
         self._recording = False
         self._processing = True  # Блокируем повторные вызовы
         self._rec_timer.stop()
@@ -942,14 +924,9 @@ class MainWindow(QMainWindow):
         self.cancel_btn.hide()
         self.close_btn.show()
 
-        with open("debug.log", "a") as f:
-            f.write(f"[DEBUG] _stop(): audio is None={audio is None}, len={len(audio) if audio is not None else 0}\n")
-
         if audio is None or len(audio) == 0 or self.recorder.get_duration(audio) < 0.5:
             self.status_label.setText("Готово")
             self._processing = False  # Разблокируем
-            with open("debug.log", "a") as f:
-                f.write(f"[DEBUG] _stop(): audio too short, _processing set to False\n")
             return
 
         self.status_label.setText("Обработка...")
@@ -959,14 +936,8 @@ class MainWindow(QMainWindow):
         self._thread.error.connect(self._error)
         self._thread.start()
 
-        with open("debug.log", "a") as f:
-            f.write(f"[DEBUG] _stop(): transcription thread started, _processing={self._processing}\n")
-
     def _cancel_recording(self):
         """Отменить запись без транскрибации."""
-        with open("debug.log", "a") as f:
-            f.write(f"[DEBUG] _cancel_recording() called\n")
-
         if not self._recording:
             return
 
@@ -988,16 +959,10 @@ class MainWindow(QMainWindow):
         self.cancel_btn.hide()
         self.close_btn.show()
 
-        with open("debug.log", "a") as f:
-            f.write(f"[DEBUG] _cancel_recording(): recording cancelled\n")
-
     def _update_timer(self):
         self.timer_label.setText(f"{time.time() - self._rec_start:.1f}с")
 
     def _done(self, text, duration):
-        with open("debug.log", "a") as f:
-            f.write(f"[DEBUG] _done() called, setting _processing=False, text_len={len(text)}\n")
-
         self._processing = False  # Разблокируем
         self._last_text = text
 
@@ -1025,7 +990,7 @@ class MainWindow(QMainWindow):
         if self.config.auto_copy and CLIPBOARD_AVAILABLE:
             try:
                 pyperclip.copy(text)
-            except:
+            except Exception:
                 pass
 
         # Показываем всплывающую панель с текстом ВСЕГДА
@@ -1034,9 +999,6 @@ class MainWindow(QMainWindow):
         # Авто-вставка текста если включено
         if self.config.auto_paste:
             QTimer.singleShot(100, lambda: self._type(text))
-
-        with open("debug.log", "a") as f:
-            f.write(f"[DEBUG] _done() finished, _processing={self._processing}\n")
 
     def _hide_timer_after_done(self):
         """Скрыть таймер после показа результата."""
@@ -1072,7 +1034,7 @@ class MainWindow(QMainWindow):
                 pyperclip.copy(text)
                 self.status_label.setText("Скопировано!")
                 QTimer.singleShot(1500, lambda: self.status_label.setText("Готово") if not self._recording else None)
-            except:
+            except Exception:
                 pass
 
     def _show_history(self):
