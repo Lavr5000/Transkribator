@@ -347,6 +347,27 @@ class CloseButton(MiniButton):
         painter.drawLine(QPoint(13, 5), QPoint(5, 13))
 
 
+class CancelButton(MiniButton):
+    """Кнопка отмены записи - показывается только во время записи."""
+    def paintEvent(self, event):
+        if self._opacity < 0.05:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        alpha = int(255 * self._opacity)
+        hover_boost = 80 if self.underMouse() else 0
+
+        # Желтовато-оранжевый цвет для отмены записи
+        color = QColor(255, 200, 50, min(255, alpha + hover_boost))
+
+        painter.setPen(QPen(color, 2.0))
+
+        # Draw thicker X
+        painter.drawLine(QPoint(4, 4), QPoint(14, 14))
+        painter.drawLine(QPoint(14, 4), QPoint(4, 14))
+
+
 class GradientWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -727,6 +748,13 @@ class MainWindow(QMainWindow):
         self.close_btn.move(COMPACT_WIDTH - 24, btn_y)
         self.close_btn.clicked.connect(self._quit)
 
+        # Cancel button - показывается только во время записи, отменяет запись
+        self.cancel_btn = CancelButton(self.central)
+        self.cancel_btn.move(COMPACT_WIDTH - 24, btn_y)  # Поверх close_btn
+        self.cancel_btn.clicked.connect(self._cancel_recording)
+        self.cancel_btn.set_opacity(0.0)  # Скрыт по умолчанию
+        self.cancel_btn.hide()
+
         self.settings_btn = SettingsButton(self.central)
         self.settings_btn.move(COMPACT_WIDTH - 24 - btn_spacing, btn_y)
         self.settings_btn.clicked.connect(self._show_settings)
@@ -881,6 +909,12 @@ class MainWindow(QMainWindow):
             self.record_btn.set_recording(True)
             self._rec_timer.start(100)
             self.tray_rec.setText("Стоп")
+
+            # Показываем кнопку отмены, скрываем кнопку закрытия
+            self.cancel_btn.set_opacity(1.0)
+            self.cancel_btn.show()
+            self.close_btn.hide()
+
             with open("debug.log", "a") as f:
                 f.write(f"[DEBUG] _start() SUCCESS: recording started\n")
         else:
@@ -904,6 +938,10 @@ class MainWindow(QMainWindow):
         self.record_btn.set_recording(False)
         self.tray_rec.setText("Запись")
 
+        # Скрываем кнопку отмены, показываем кнопку закрытия
+        self.cancel_btn.hide()
+        self.close_btn.show()
+
         with open("debug.log", "a") as f:
             f.write(f"[DEBUG] _stop(): audio is None={audio is None}, len={len(audio) if audio is not None else 0}\n")
 
@@ -924,6 +962,35 @@ class MainWindow(QMainWindow):
         with open("debug.log", "a") as f:
             f.write(f"[DEBUG] _stop(): transcription thread started, _processing={self._processing}\n")
 
+    def _cancel_recording(self):
+        """Отменить запись без транскрибации."""
+        with open("debug.log", "a") as f:
+            f.write(f"[DEBUG] _cancel_recording() called\n")
+
+        if not self._recording:
+            return
+
+        # Останавливаем запись и сбрасываем флаги
+        self._recording = False
+        self._processing = False
+        self._rec_timer.stop()
+
+        # Останавливаем рекордер
+        self.recorder.stop()
+
+        # Сбрасываем UI
+        self.timer_label.hide()
+        self.record_btn.set_recording(False)
+        self.tray_rec.setText("Запись")
+        self.status_label.setText("Отменено")
+
+        # Скрываем кнопку отмены, показываем кнопку закрытия
+        self.cancel_btn.hide()
+        self.close_btn.show()
+
+        with open("debug.log", "a") as f:
+            f.write(f"[DEBUG] _cancel_recording(): recording cancelled\n")
+
     def _update_timer(self):
         self.timer_label.setText(f"{time.time() - self._rec_start:.1f}с")
 
@@ -942,6 +1009,10 @@ class MainWindow(QMainWindow):
         self.timer_label.setText(f"{self._rec_duration:.1f}→{transcription_time:.1f}с")
         self.timer_label.show()
         QTimer.singleShot(2000, self._hide_timer_after_done)
+
+        # Убеждаемся что кнопка закрытия видна (на всякий случай)
+        self.cancel_btn.hide()
+        self.close_btn.show()
 
         if self._settings and self._settings.isVisible():
             self._settings.update_stats_display()
@@ -975,6 +1046,10 @@ class MainWindow(QMainWindow):
     def _error(self, err):
         self._processing = False  # Разблокируем
         self.status_label.setText("Ошибка")
+
+        # Возвращаем кнопку закрытия при ошибке
+        self.cancel_btn.hide()
+        self.close_btn.show()
 
     def _type(self, text):
         try:
