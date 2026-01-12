@@ -32,23 +32,24 @@ except ImportError:
     CLIPBOARD_AVAILABLE = False
 
 
-# Brand gradient colors (AI vibes style)
+# Gradient colors - Aural Flux theme
 GRADIENT_COLORS = {
-    'left': '#6366f1',    # Indigo
-    'middle': '#8b5cf6',  # Violet
-    'right': '#ec4899',   # Pink
+    'left': '#1e3a5f',      # Deep Navy Blue
+    'middle': '#0ea5e9',    # Electric Blue
+    'right': '#22d3ee',     # Bright Cyan
 }
 
 COLORS = {
-    'bg_dark': '#0f0f1a',      # Darker background
-    'bg_medium': '#1a1a2e',    # Medium background
-    'bg_light': '#2d2d44',     # Lighter background
-    'accent': '#8b5cf6',       # Violet accent
-    'text_primary': '#ffffff', # White text
-    'text_secondary': '#a0a0b0', # Soft gray text
-    'success': '#10b981',      # Green
-    'border': '#3d3d5c',       # Softer border
-    'telegram': '#0088cc',     # Telegram blue
+    'bg_dark': '#0f1437',      # Deepest navy
+    'bg_medium': '#1e3a5f',    # Mid navy
+    'bg_light': '#235a8c',     # Light navy teal
+    'accent': '#0ea5e9',       # Electric blue
+    'accent_bright': '#22d3ee',# Cyan highlights
+    'accent_glow': '#78e6ff',  # Glowing cyan
+    'text_primary': '#f0f9ff', # Nearly white
+    'text_secondary': '#94a3b8',# Muted blue-gray
+    'success': '#10b981',
+    'border': '#1e3a5f',
 }
 
 COMPACT_HEIGHT = 52
@@ -191,10 +192,10 @@ class RecordButton(QPushButton):
         center_y = self.height() / 2
 
         if self._recording:
-            # Recording state - draw animated sound waves
+            # Recording state - draw animated sound waves with cyan glow
             base_alpha = 180
 
-            # Draw pulsing circles based on audio level
+            # Draw pulsing circles based on audio level - Aural Flux cyan colors
             for i in range(3):
                 import math
                 phase_offset = i * 0.8
@@ -203,26 +204,27 @@ class RecordButton(QPushButton):
                 alpha = int(base_alpha * (1 - i * 0.3) * (0.5 + self._audio_level * 0.5))
 
                 painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(QColor(255, 255, 255, alpha))
+                # Cyan glow instead of white
+                painter.setBrush(QColor(34, 211, 238, alpha))
                 painter.drawEllipse(
                     QRectF(center_x - radius, center_y - radius, radius * 2, radius * 2)
                 )
 
-            # Draw center circle (stop button)
-            painter.setBrush(QColor(255, 255, 255, 240))
+            # Draw center circle (stop button) - cyan accent
+            painter.setBrush(QColor(120, 230, 255, 240))
             painter.drawRoundedRect(
                 QRectF(center_x - 6, center_y - 6, 12, 12), 2, 2
             )
         else:
-            # Idle state - draw microphone icon
-            # Outer glow on hover
+            # Idle state - draw microphone icon with cyan outline
+            # Outer cyan glow on hover
             if self.underMouse():
-                painter.setBrush(QColor(255, 255, 255, 30))
+                painter.setBrush(QColor(34, 211, 238, 40))
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.drawEllipse(QRectF(2, 2, 32, 32))
 
-            # Mic body
-            painter.setPen(QPen(QColor(255, 255, 255, 220), 2))
+            # Mic body - cyan color
+            painter.setPen(QPen(QColor(34, 211, 238, 220), 2))
             painter.setBrush(Qt.BrushStyle.NoBrush)
 
             # Mic head (rounded rect)
@@ -369,60 +371,46 @@ class CancelButton(MiniButton):
         painter.drawLine(QPoint(14, 4), QPoint(4, 14))
 
 
-class TelegramLink(QWidget):
-    """Ссылка на Telegram канал с логотипом."""
-    clicked = pyqtSignal()
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedSize(160, 18)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._hover = False
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        # Telegram blue color
-        tg_color = QColor(COLORS['telegram'])
-        if self._hover:
-            tg_color = tg_color.lighter(120)
-
-        # Draw Telegram plane icon (simplified)
-        painter.setPen(QPen(tg_color, 1.5))
-        painter.setBrush(QBrush(tg_color))
-
-        # Simple paper plane shape
-        plane_path = QPainterPath()
-        plane_path.moveTo(8, 6)
-        plane_path.lineTo(14, 10)
-        plane_path.lineTo(8, 14)
-        plane_path.lineTo(10, 10)
-        plane_path.closeSubpath()
-
-        # Draw plane
-        painter.drawPath(plane_path)
-
-        # Draw text "@ai_vibes_coding_ru"
-        painter.setPen(QColor(255, 255, 255, 180))
-        font = painter.font()
-        font.setPointSize(7)
-        painter.setFont(font)
-
-        text_rect = self.rect().adjusted(18, 0, 0, 0)
-        painter.drawText(text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, "@ai_vibes_coding_ru")
-
-    def enterEvent(self, event):
-        self._hover = True
-        self.update()
-
-    def leaveEvent(self, event):
-        self._hover = False
-        self.update()
+class TelegramButton(MiniButton):
+    """Telegram button with paper plane icon - opens t.me/ai_vibes_coding_ru"""
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit()
+            import webbrowser
+            webbrowser.open('https://t.me/ai_vibes_coding_ru')
+
+    def paintEvent(self, event):
+        if self._opacity < 0.05:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        alpha = int(255 * self._opacity)
+        hover_boost = 60 if self.underMouse() else 0
+
+        # Cyan glow color for Telegram
+        color = QColor(120, 230, 255, min(255, alpha + hover_boost))
+
+        painter.setPen(QPen(color, 1.5))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+
+        # Draw paper plane icon (diagonal up-right)
+        # Paper plane path
+        path = QPainterPath()
+        center_x, center_y = 9, 9
+
+        # Main body of the plane
+        path.moveTo(center_x - 5, center_y + 3)
+        path.lineTo(center_x + 5, center_y - 2)
+        path.lineTo(center_x - 1, center_y + 5)
+        path.closeSubpath()
+
+        # Wing detail
+        path.moveTo(center_x - 1, center_y + 5)
+        path.lineTo(center_x + 5, center_y - 2)
+        path.lineTo(center_x + 2, center_y + 4)
+
+        painter.drawPath(path)
 
 
 class GradientWidget(QWidget):
@@ -474,7 +462,7 @@ class TextPopup(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Градиентный фон как у главного окна
+        # Aural Flux gradient background
         gradient = QLinearGradient(0, 0, self.width(), 0)
         gradient.setColorAt(0.0, QColor(GRADIENT_COLORS['left']))
         gradient.setColorAt(0.5, QColor(GRADIENT_COLORS['middle']))
@@ -484,22 +472,22 @@ class TextPopup(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(self.rect(), 12, 12)
 
-        # Текст
+        # Текст с обновленным цветом
         if self._text:
-            painter.setPen(QPen(QColor(255, 255, 255, 230)))
+            painter.setPen(QPen(QColor(240, 249, 255, 230)))  # text_primary color
             font = painter.font()
-            font.setPointSize(10)  # Уменьшен с 11 до 10
+            font.setPointSize(10)
             painter.setFont(font)
 
             # Отступы
             text_rect = self.rect().adjusted(12, 8, -40, -8)
             painter.drawText(text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextWordWrap, self._text)
 
-        # Кнопка копирования (справа)
+        # Кнопка копирования (справа) - cyan accent
         copy_btn_x = self.width() - 30
         copy_btn_y = (self.height() - 18) // 2
 
-        painter.setPen(QPen(QColor(255, 255, 255, 200), 1.5))
+        painter.setPen(QPen(QColor(34, 211, 238, 200), 1.5))  # Cyan color
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRoundedRect(QRectF(copy_btn_x, copy_btn_y + 2, 8, 10), 1, 1)
         painter.drawRoundedRect(QRectF(copy_btn_x + 4, copy_btn_y, 8, 10), 1, 1)
@@ -820,13 +808,11 @@ class MainWindow(QMainWindow):
         self.copy_btn.move(COMPACT_WIDTH - 24 - btn_spacing * 2, btn_y)
         self.copy_btn.clicked.connect(self._copy_last)
 
-        self._corner_btns = [self.copy_btn, self.settings_btn, self.close_btn]
-        self._set_corner_opacity(0.0)
+        self.telegram_btn = TelegramButton(self.central)
+        self.telegram_btn.move(COMPACT_WIDTH - 24 - btn_spacing * 3, btn_y)
 
-        # Telegram link (bottom-right, below close button)
-        self.telegram_link = TelegramLink(self.central)
-        self.telegram_link.move(COMPACT_WIDTH - 165, COMPACT_HEIGHT - 21)
-        self.telegram_link.clicked.connect(self._open_telegram_channel)
+        self._corner_btns = [self.telegram_btn, self.copy_btn, self.settings_btn, self.close_btn]
+        self._set_corner_opacity(0.0)
 
         # Recording timer
         self._rec_timer = QTimer()
@@ -853,6 +839,7 @@ class MainWindow(QMainWindow):
         pix.fill(Qt.GlobalColor.transparent)
         p = QPainter(pix)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        # Aural Flux gradient for tray icon
         g = QLinearGradient(0, 0, 32, 0)
         g.setColorAt(0, QColor(GRADIENT_COLORS['left']))
         g.setColorAt(0.5, QColor(GRADIENT_COLORS['middle']))
@@ -1217,11 +1204,6 @@ class MainWindow(QMainWindow):
         self.tray.hide()
         self.config.save()
         QApplication.quit()
-
-    def _open_telegram_channel(self):
-        """Open the Telegram channel in browser."""
-        import webbrowser
-        webbrowser.open("https://t.me/ai_vibes_coding_ru")
 
 
 def run():
