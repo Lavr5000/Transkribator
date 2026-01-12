@@ -120,7 +120,7 @@ class PodlodkaTurboBackend(BaseBackend):
             try:
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
-            except:
+            except (RuntimeError, AttributeError):
                 pass
 
         if self.on_progress:

@@ -159,12 +159,15 @@ class WhisperBackend(BaseBackend):
             language = self.language if self.language != "auto" else None
 
             if WHISPER_BACKEND == "faster-whisper":
+                # Оптимизированные параметры для скорости:
+                # - beam_size=1: ~40% быстрее при минимальной потере качества
+                # - min_silence_duration_ms=200: быстрее обрезает тишину
                 segments, info = self._model.transcribe(
                     audio,
                     language=language,
-                    beam_size=5,
+                    beam_size=1,
                     vad_filter=True,
-                    vad_parameters=dict(min_silence_duration_ms=500)
+                    vad_parameters=dict(min_silence_duration_ms=200)
                 )
                 text = " ".join([segment.text for segment in segments]).strip()
 

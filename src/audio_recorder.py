@@ -1,11 +1,13 @@
 """Audio recording module for WhisperTyping."""
-import io
+import logging
 import queue
 import threading
 import tempfile
 from pathlib import Path
 from typing import Callable, Optional
 import numpy as np
+
+logger = logging.getLogger("whisper-typing")
 
 try:
     import sounddevice as sd
@@ -41,7 +43,7 @@ class AudioRecorder:
     def _audio_callback(self, indata, frames, time_info, status):
         """Callback for audio stream."""
         if status:
-            print(f"Audio status: {status}")
+            logger.debug(f"Audio status: {status}")
 
         # Copy audio data
         data = indata.copy()
@@ -55,7 +57,7 @@ class AudioRecorder:
     def start(self) -> bool:
         """Start recording audio."""
         if not AUDIO_AVAILABLE:
-            print("Audio libraries not available")
+            logger.error("Audio libraries not available")
             return False
 
         with self._lock:
@@ -86,7 +88,7 @@ class AudioRecorder:
 
                 return True
             except Exception as e:
-                print(f"Failed to start recording: {e}")
+                logger.error(f"Failed to start recording: {e}")
                 return False
 
     def _collect_audio(self):
