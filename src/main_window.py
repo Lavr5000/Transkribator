@@ -33,24 +33,36 @@ except ImportError:
     CLIPBOARD_AVAILABLE = False
 
 
-# Gradient colors - Aural Flux theme
+# Gradient colors - Algorithmic Presence theme
 GRADIENT_COLORS = {
-    'left': '#1e3a5f',      # Deep Navy Blue
-    'middle': '#0ea5e9',    # Electric Blue
-    'right': '#22d3ee',     # Bright Cyan
+    'left': '#081420',      # Deepest navy
+    'middle': '#0F2840',    # Electric blue-dark
+    'right': '#1E5080',     # Lighter navy-blue
 }
 
 COLORS = {
-    'bg_dark': '#0f1437',      # Deepest navy
-    'bg_medium': '#1e3a5f',    # Mid navy
-    'bg_light': '#235a8c',     # Light navy teal
-    'accent': '#0ea5e9',       # Electric blue
-    'accent_bright': '#22d3ee',# Cyan highlights
-    'accent_glow': '#78e6ff',  # Glowing cyan
-    'text_primary': '#f0f9ff', # Nearly white
-    'text_secondary': '#94a3b8',# Muted blue-gray
-    'success': '#10b981',
-    'border': '#1e3a5f',
+    'bg_darkest': (8, 12, 20),       # #080C14 - Near black
+    'bg_dark': (15, 25, 40),         # #0F1928 - Deep navy
+    'bg_mid': (25, 40, 65),          # #192841 - Mid navy
+    'accent_primary': (0, 120, 255),   # #0078FF - Electric blue
+    'accent_secondary': (0, 200, 255), # #00C8FF - Cyan
+    'accent_glow': (100, 220, 255),    # #64DCFF - Light cyan
+    'text_primary': (245, 248, 255),   # #F5F8FF - Nearly white
+    'text_secondary': (140, 160, 180), # #8CA0B4 - Muted blue-gray
+    'success': (10, 185, 129),        # #0AB981 - Emerald green
+    'border': (25, 40, 65),           # #192841 - Subtle border
+}
+
+# Hex versions for CSS stylesheets
+COLORS_HEX = {
+    'bg_darkest': '#080C14',
+    'bg_dark': '#0F1928',
+    'bg_mid': '#192841',
+    'accent_primary': '#0078FF',      # Electric blue
+    'accent_secondary': '#00C8FF',    # Cyan
+    'accent_glow': '#64DCFF',         # Light cyan
+    'text_primary': '#F5F8FF',
+    'text_secondary': '#8CA0B4',
 }
 
 COMPACT_HEIGHT = 52
@@ -68,33 +80,33 @@ QLabel {{
     font-size: 13px;
 }}
 QPushButton {{
-    background-color: {COLORS['bg_light']};
+    background-color: {COLORS['bg_mid']};
     color: {COLORS['text_primary']};
     border: 1px solid {COLORS['border']};
     border-radius: 8px;
     padding: 8px 16px;
 }}
 QPushButton:hover {{
-    background-color: {COLORS['accent']};
+    background-color: {COLORS['accent_primary']};
 }}
 QTextEdit {{
-    background-color: {COLORS['bg_medium']};
+    background-color: {COLORS['bg_mid']};
     color: {COLORS['text_primary']};
     border: 1px solid {COLORS['border']};
     border-radius: 8px;
     padding: 10px;
 }}
 QComboBox {{
-    background-color: {COLORS['bg_medium']};
+    background-color: {COLORS['bg_mid']};
     color: {COLORS['text_primary']};
     border: 1px solid {COLORS['border']};
     border-radius: 6px;
     padding: 8px;
 }}
 QComboBox QAbstractItemView {{
-    background-color: {COLORS['bg_medium']};
+    background-color: {COLORS['bg_mid']};
     color: {COLORS['text_primary']};
-    selection-background-color: {COLORS['accent']};
+    selection-background-color: {COLORS['accent_primary']};
 }}
 QCheckBox {{
     color: {COLORS['text_primary']};
@@ -104,10 +116,10 @@ QCheckBox::indicator {{
     height: 18px;
     border-radius: 4px;
     border: 1px solid {COLORS['border']};
-    background-color: {COLORS['bg_medium']};
+    background-color: {COLORS['bg_mid']};
 }}
 QCheckBox::indicator:checked {{
-    background-color: {COLORS['accent']};
+    background-color: {COLORS['accent_primary']};
 }}
 QGroupBox {{
     color: {COLORS['text_primary']};
@@ -122,7 +134,7 @@ QTabWidget::pane {{
     background-color: {COLORS['bg_dark']};
 }}
 QTabBar::tab {{
-    background-color: {COLORS['bg_medium']};
+    background-color: {COLORS['bg_mid']};
     color: {COLORS['text_secondary']};
     border-top-left-radius: 6px;
     border-top-right-radius: 6px;
@@ -193,39 +205,39 @@ class RecordButton(QPushButton):
         center_y = self.height() / 2
 
         if self._recording:
-            # Recording state - draw animated sound waves with cyan glow
+            # Recording state - Algorithmic Presence cyan glow
             base_alpha = 180
 
-            # Draw pulsing circles based on audio level - Aural Flux cyan colors
-            for i in range(3):
+            # Pulsing circles with cyan glow - 4 layers for richer effect
+            for i in range(4):
                 import math
                 phase_offset = i * 0.8
                 pulse = (math.sin(self._wave_phase + phase_offset) + 1) / 2
-                radius = 8 + i * 5 + self._audio_level * 6 * pulse
-                alpha = int(base_alpha * (1 - i * 0.3) * (0.5 + self._audio_level * 0.5))
+                radius = 8 + i * 6 + self._audio_level * 8 * pulse
+                alpha = int(base_alpha * (1 - i * 0.25) * (0.5 + self._audio_level * 0.5))
 
                 painter.setPen(Qt.PenStyle.NoPen)
-                # Cyan glow instead of white
-                painter.setBrush(QColor(34, 211, 238, alpha))
+                # Algorithmic Presence cyan
+                painter.setBrush(QColor(*COLORS['accent_secondary'], alpha))
                 painter.drawEllipse(
                     QRectF(center_x - radius, center_y - radius, radius * 2, radius * 2)
                 )
 
-            # Draw center circle (stop button) - cyan accent
-            painter.setBrush(QColor(120, 230, 255, 240))
+            # Center circle (stop button) - light cyan
+            painter.setBrush(QColor(*COLORS['accent_glow'], 240))
             painter.drawRoundedRect(
                 QRectF(center_x - 6, center_y - 6, 12, 12), 2, 2
             )
         else:
-            # Idle state - draw microphone icon with cyan outline
-            # Outer cyan glow on hover
+            # Idle state - geometric mic icon with electric blue
+            # Outer glow on hover
             if self.underMouse():
-                painter.setBrush(QColor(34, 211, 238, 40))
+                painter.setBrush(QColor(*COLORS['accent_primary'], 40))
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.drawEllipse(QRectF(2, 2, 32, 32))
 
-            # Mic body - cyan color
-            painter.setPen(QPen(QColor(34, 211, 238, 220), 2))
+            # Mic body - electric blue color
+            painter.setPen(QPen(QColor(*COLORS['accent_secondary'], 220), 2))
             painter.setBrush(Qt.BrushStyle.NoBrush)
 
             # Mic head (rounded rect)
@@ -266,17 +278,26 @@ class MiniButton(QPushButton):
     def paintEvent(self, event):
         if self._opacity < 0.05:
             return
-        # Subclasses implement actual drawing
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Geometric rounded square background
+        bg_alpha = int(100 * self._opacity)
+        painter.setBrush(QColor(*COLORS['bg_mid'], bg_alpha))
+        painter.setPen(QPen(QColor(255, 255, 255, int(255 * self._opacity)), 1))
+        painter.drawRoundedRect(QRectF(0, 0, 18, 18), 4, 4)
+
+        # Subclasses implement icon drawing on top of background
+        self._draw_icon(painter)
+
+    def _draw_icon(self, painter):
+        # Override in subclasses
         pass
 
 
 class CopyButton(MiniButton):
-    def paintEvent(self, event):
-        if self._opacity < 0.05:
-            return
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
+    def _draw_icon(self, painter):
         alpha = int(255 * self._opacity)
         hover_boost = 60 if self.underMouse() else 0
 
@@ -289,12 +310,7 @@ class CopyButton(MiniButton):
 
 
 class HistoryButton(MiniButton):
-    def paintEvent(self, event):
-        if self._opacity < 0.05:
-            return
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
+    def _draw_icon(self, painter):
         alpha = int(255 * self._opacity)
         hover_boost = 60 if self.underMouse() else 0
 
@@ -307,39 +323,29 @@ class HistoryButton(MiniButton):
 
 
 class SettingsButton(MiniButton):
-    def paintEvent(self, event):
-        if self._opacity < 0.05:
-            return
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
+    def _draw_icon(self, painter):
         alpha = int(255 * self._opacity)
         hover_boost = 60 if self.underMouse() else 0
 
         painter.setPen(QPen(QColor(255, 255, 255, min(255, alpha + hover_boost)), 1.5))
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
-        # Draw gear icon (simplified)
-        painter.drawEllipse(QRectF(5, 5, 8, 8))
-
-        # Gear teeth
+        # Geometric gear - 8 spokes for better look
         import math
-        for i in range(6):
-            angle = i * math.pi / 3
-            x1 = 9 + 4 * math.cos(angle)
-            y1 = 9 + 4 * math.sin(angle)
-            x2 = 9 + 6 * math.cos(angle)
-            y2 = 9 + 6 * math.sin(angle)
+        center_x, center_y = 9, 9
+        for i in range(8):
+            angle = i * math.pi / 4
+            r_inner, r_outer = 5, 8
+            x1, y1 = center_x + r_inner * math.cos(angle), center_y + r_inner * math.sin(angle)
+            x2, y2 = center_x + r_outer * math.cos(angle), center_y + r_outer * math.sin(angle)
             painter.drawLine(QPoint(int(x1), int(y1)), QPoint(int(x2), int(y2)))
+
+        # Center circle
+        painter.drawEllipse(QRectF(center_x - 3, center_y - 3, 6, 6))
 
 
 class CloseButton(MiniButton):
-    def paintEvent(self, event):
-        if self._opacity < 0.05:
-            return
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
+    def _draw_icon(self, painter):
         alpha = int(255 * self._opacity)
         hover_boost = 60 if self.underMouse() else 0
         color = QColor(255, 100, 100, min(255, alpha + hover_boost)) if self.underMouse() else QColor(255, 255, 255, alpha)
@@ -362,7 +368,7 @@ class CancelButton(MiniButton):
         alpha = int(255 * self._opacity)
         hover_boost = 80 if self.underMouse() else 0
 
-        # Желтовато-оранжевый цвет для отмены записи
+        # Yellow-orange color for cancel
         color = QColor(255, 200, 50, min(255, alpha + hover_boost))
 
         painter.setPen(QPen(color, 2.0))
@@ -380,23 +386,17 @@ class TelegramButton(MiniButton):
             import webbrowser
             webbrowser.open('https://t.me/ai_vibes_coding_ru')
 
-    def paintEvent(self, event):
-        if self._opacity < 0.05:
-            return
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
+    def _draw_icon(self, painter):
         alpha = int(255 * self._opacity)
         hover_boost = 60 if self.underMouse() else 0
 
-        # Cyan glow color for Telegram
-        color = QColor(120, 230, 255, min(255, alpha + hover_boost))
+        # Algorithmic Presence cyan glow
+        color = QColor(*COLORS['accent_secondary'], min(255, alpha + hover_boost))
 
         painter.setPen(QPen(color, 1.5))
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
         # Draw paper plane icon (diagonal up-right)
-        # Paper plane path
         path = QPainterPath()
         center_x, center_y = 9, 9
 
@@ -463,7 +463,7 @@ class TextPopup(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Aural Flux gradient background
+        # Algorithmic Presence gradient background
         gradient = QLinearGradient(0, 0, self.width(), 0)
         gradient.setColorAt(0.0, QColor(GRADIENT_COLORS['left']))
         gradient.setColorAt(0.5, QColor(GRADIENT_COLORS['middle']))
@@ -473,9 +473,9 @@ class TextPopup(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(self.rect(), 12, 12)
 
-        # Текст с обновленным цветом
+        # Текст с Algorithmic Presence цветом
         if self._text:
-            painter.setPen(QPen(QColor(240, 249, 255, 230)))  # text_primary color
+            painter.setPen(QPen(QColor(*COLORS['text_primary'], 230)))
             font = painter.font()
             font.setPointSize(10)
             painter.setFont(font)
@@ -484,11 +484,11 @@ class TextPopup(QWidget):
             text_rect = self.rect().adjusted(12, 8, -40, -8)
             painter.drawText(text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextWordWrap, self._text)
 
-        # Кнопка копирования (справа) - cyan accent
+        # Кнопка копирования (справа) - electric blue accent
         copy_btn_x = self.width() - 30
         copy_btn_y = (self.height() - 18) // 2
 
-        painter.setPen(QPen(QColor(34, 211, 238, 200), 1.5))  # Cyan color
+        painter.setPen(QPen(QColor(*COLORS['accent_secondary'], 200), 1.5))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRoundedRect(QRectF(copy_btn_x, copy_btn_y + 2, 8, 10), 1, 1)
         painter.drawRoundedRect(QRectF(copy_btn_x + 4, copy_btn_y, 8, 10), 1, 1)
@@ -805,15 +805,33 @@ class MainWindow(QMainWindow):
         self.central.setMouseTracking(True)
         self.setCentralWidget(self.central)
 
+        # Brand letter "A" - architectural element from Algorithmic Presence
+        self.brand_label = QLabel("A", self.central)
+        self.brand_label.setStyleSheet(f"""
+            QLabel {{
+                color: #{COLORS_HEX['accent_primary']};
+                font-size: 28px;
+                font-weight: bold;
+                font-family: Arial;
+            }}
+        """)
+        self.brand_label.setFixedWidth(30)
+        self.brand_label.move(8, 10)  # Left side, vertically centered
+
         # Status label (left) - фиксированная ширина для всех статусов
         self.status_label = QLabel("Готово", self.central)
-        self.status_label.setStyleSheet("color: white; font-size: 13px; font-weight: 500;")
+        self.status_label.setStyleSheet(f"color: #{COLORS_HEX['text_primary']}; font-size: 13px; font-weight: 500;")
         self.status_label.setFixedWidth(85)  # Для "Готово", "Слушаю", "Обработка..."
-        self.status_label.move(12, 17)
+        self.status_label.move(40, 17)  # Shifted right to make room for "A"
 
         # Timer label - позиционируется слева, чтобы не перекрывать кнопку записи
         self.timer_label = QLabel("", self.central)
-        self.timer_label.setStyleSheet("color: rgba(255,255,255,0.8); font-size: 10px;")
+        self.timer_label.setStyleSheet(f"""
+            color: #{COLORS_HEX['accent_secondary']};
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 11px;
+            font-weight: 500;
+        """)
         self.timer_label.setFixedWidth(55)  # Компактный "9.9→9.9с"
         self.timer_label.move(95, 18)  # Слева от кнопки записи (95-150)
         self.timer_label.hide()
