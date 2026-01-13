@@ -53,3 +53,7 @@ Thumbs.db
 
 # Config (user-specific)
 config.json
+
+# Claude Code temporary directories
+tmpclaude-*-cwd
+nul
