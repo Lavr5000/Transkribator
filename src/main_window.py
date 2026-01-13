@@ -414,6 +414,28 @@ class TelegramButton(MiniButton):
         painter.drawPath(path)
 
 
+class ClickableLabel(QLabel):
+    """Label that opens URL on click."""
+
+    def __init__(self, text, url, parent=None):
+        super().__init__(text, parent)
+        self.url = url
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            import webbrowser
+            webbrowser.open(self.url)
+
+    def enterEvent(self, event):
+        self.setStyleSheet(self.styleSheet().replace("opacity: 0.7", "opacity: 1.0"))
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.setStyleSheet(self.styleSheet().replace("opacity: 1.0", "opacity: 0.7"))
+        super().leaveEvent(event)
+
+
 class GradientWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -805,24 +827,26 @@ class MainWindow(QMainWindow):
         self.central.setMouseTracking(True)
         self.setCentralWidget(self.central)
 
-        # Brand letter "A" - architectural element from Algorithmic Presence
-        self.brand_label = QLabel("A", self.central)
+        # Telegram channel label - always visible, clickable
+        self.brand_label = ClickableLabel("NoCodeiFounder", "https://t.me/NoCodeiFounder", self.central)
         self.brand_label.setStyleSheet(f"""
             QLabel {{
-                color: #{COLORS_HEX['accent_primary']};
-                font-size: 28px;
-                font-weight: bold;
-                font-family: Arial;
+                color: #{COLORS_HEX['text_secondary']};
+                font-size: 10px;
+                font-weight: 500;
+                font-family: 'Segoe UI', Arial, sans-serif;
+                opacity: 0.7;
+                letter-spacing: 0.3px;
             }}
         """)
-        self.brand_label.setFixedWidth(30)
-        self.brand_label.move(8, 10)  # Left side, vertically centered
+        self.brand_label.setFixedWidth(95)
+        self.brand_label.move(8, 8)  # Left side, top
 
         # Status label (left) - фиксированная ширина для всех статусов
         self.status_label = QLabel("Готово", self.central)
         self.status_label.setStyleSheet(f"color: #{COLORS_HEX['text_primary']}; font-size: 13px; font-weight: 500;")
         self.status_label.setFixedWidth(85)  # Для "Готово", "Слушаю", "Обработка..."
-        self.status_label.move(40, 17)  # Shifted right to make room for "A"
+        self.status_label.move(105, 17)  # Shifted right to make room for channel label
 
         # Timer label - позиционируется слева, чтобы не перекрывать кнопку записи
         self.timer_label = QLabel("", self.central)
@@ -833,7 +857,7 @@ class MainWindow(QMainWindow):
             font-weight: 500;
         """)
         self.timer_label.setFixedWidth(55)  # Компактный "9.9→9.9с"
-        self.timer_label.move(95, 18)  # Слева от кнопки записи (95-150)
+        self.timer_label.move(195, 18)  # После статус-лейбла (105+85=190 + 5px padding)
         self.timer_label.hide()
 
         # Center record button
@@ -929,9 +953,14 @@ class MainWindow(QMainWindow):
             try:
                 pyperclip.copy(text)
                 self.status_label.setText("Скопировано!")
-                QTimer.singleShot(1500, lambda: self.status_label.setText("Готово") if not self._recording else None)
+                QTimer.singleShot(1500, self._restore_status_after_copy)
             except:
                 pass
+
+    def _restore_status_after_copy(self):
+        """Восстановить статус после копирования."""
+        if not self._recording:
+            self.status_label.setText("Готово")
 
     def _show_text_popup(self, text: str):
         """Показать всплывающую панель с текстом сверху окна."""
@@ -1103,7 +1132,6 @@ class MainWindow(QMainWindow):
     def _update_timer(self):
         elapsed = time.time() - self._rec_start
         self.timer_label.setText(f"{elapsed:.1f}с")
-        self.timer_label.repaint()  # Force UI update
 
     def _done(self, text, duration):
         with open("debug.log", "a") as f:
@@ -1182,7 +1210,7 @@ class MainWindow(QMainWindow):
             try:
                 pyperclip.copy(text)
                 self.status_label.setText("Скопировано!")
-                QTimer.singleShot(1500, lambda: self.status_label.setText("Готово") if not self._recording else None)
+                QTimer.singleShot(1500, self._restore_status_after_copy)
             except:
                 pass
 
