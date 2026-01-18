@@ -763,6 +763,7 @@ class SettingsDialog(QDialog):
 class MainWindow(QMainWindow):
     status_update = pyqtSignal(str)
     audio_level_update = pyqtSignal(float)
+    _request_toggle = pyqtSignal()  # Thread-safe signal for hotkey/mouse callbacks
 
     def __init__(self):
         super().__init__()
@@ -998,6 +999,9 @@ class MainWindow(QMainWindow):
     def _connect_signals(self):
         self.status_update.connect(self._set_status)
         self.audio_level_update.connect(self._set_level)
+        # Connect toggle signal for thread-safe hotkey/mouse callbacks
+        # This ensures _toggle_recording runs in the main Qt thread
+        self._request_toggle.connect(self._toggle_recording, Qt.ConnectionType.QueuedConnection)
 
     def _load_model(self):
         threading.Thread(target=self.transcriber.load_model, daemon=True).start()
@@ -1046,11 +1050,20 @@ class MainWindow(QMainWindow):
         self.status_update.emit(msg)
 
     def _on_hotkey(self):
-        self._toggle_recording()
+        """Called from hotkey thread - emit signal for thread-safe handling."""
+        try:
+            if not self._shutting_down:
+                self._request_toggle.emit()
+        except RuntimeError:
+            pass  # Widget destroyed
 
     def _on_mouse_click(self):
-        """Обработка нажатия кнопки мыши для записи."""
-        self._toggle_recording()
+        """Called from mouse handler thread - emit signal for thread-safe handling."""
+        try:
+            if not self._shutting_down:
+                self._request_toggle.emit()
+        except RuntimeError:
+            pass  # Widget destroyed
 
     def _toggle_recording(self):
         # Защита от повторных вызовов во время обработки транскрибации
