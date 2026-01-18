@@ -831,14 +831,14 @@ class MainWindow(QMainWindow):
         self.brand_label.setFixedWidth(95)
         self.brand_label.move(8, 8)  # Left side, top
 
-        # Status label (left) - фиксированная ширина для всех статусов
+        # Status label - слева снизу (зеркально brand_label)
         self.status_label = QLabel("Готово", self.central)
         self.status_label.setStyleSheet(f"color: #{COLORS_HEX['text_primary']}; font-size: 13px; font-weight: 500;")
         self.status_label.setFixedWidth(85)  # Для "Готово", "Слушаю", "Обработка..."
-        self.status_label.move(105, 17)  # Shifted right to make room for channel label
+        self.status_label.move(8, 35)  # Левый нижний угол
         self.status_label.hide()  # Скрыт при запуске, показывается при hover
 
-        # Timer label - позиционируется слева, чтобы не перекрывать кнопку записи
+        # Timer label - справа снизу, на одной высоте со статусом
         self.timer_label = QLabel("", self.central)
         self.timer_label.setStyleSheet(f"""
             color: #{COLORS_HEX['accent_secondary']};
@@ -847,7 +847,7 @@ class MainWindow(QMainWindow):
             font-weight: 500;
         """)
         self.timer_label.setFixedWidth(55)  # Компактный "9.9→9.9с"
-        self.timer_label.move(195, 18)  # После статус-лейбла (105+85=190 + 5px padding)
+        self.timer_label.move(COMPACT_WIDTH - 55 - 8, 35)  # Правый нижний угол (340-55-8=277)
         self.timer_label.hide()
 
         # Center record button
