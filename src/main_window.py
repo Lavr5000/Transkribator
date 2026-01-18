@@ -387,42 +387,6 @@ class CancelButton(MiniButton):
         painter.drawLine(QPoint(14, 4), QPoint(4, 14))
 
 
-class TelegramButton(MiniButton):
-    """Telegram button with paper plane icon - opens t.me/ai_vibes_coding_ru"""
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            import webbrowser
-            webbrowser.open('https://t.me/ai_vibes_coding_ru')
-
-    def _draw_icon(self, painter):
-        alpha = int(255 * self._opacity)
-        hover_boost = 60 if self.underMouse() else 0
-
-        # Algorithmic Presence cyan glow
-        color = QColor(*COLORS['accent_secondary'], min(255, alpha + hover_boost))
-
-        painter.setPen(QPen(color, 1.5))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-
-        # Draw paper plane icon (diagonal up-right)
-        path = QPainterPath()
-        center_x, center_y = 9, 9
-
-        # Main body of the plane
-        path.moveTo(center_x - 5, center_y + 3)
-        path.lineTo(center_x + 5, center_y - 2)
-        path.lineTo(center_x - 1, center_y + 5)
-        path.closeSubpath()
-
-        # Wing detail
-        path.moveTo(center_x - 1, center_y + 5)
-        path.lineTo(center_x + 5, center_y - 2)
-        path.lineTo(center_x + 2, center_y + 4)
-
-        painter.drawPath(path)
-
-
 class ClickableLabel(QLabel):
     """Label that opens URL on click."""
 
@@ -872,6 +836,7 @@ class MainWindow(QMainWindow):
         self.status_label.setStyleSheet(f"color: #{COLORS_HEX['text_primary']}; font-size: 13px; font-weight: 500;")
         self.status_label.setFixedWidth(85)  # Для "Готово", "Слушаю", "Обработка..."
         self.status_label.move(105, 17)  # Shifted right to make room for channel label
+        self.status_label.hide()  # Скрыт при запуске, показывается при hover
 
         # Timer label - позиционируется слева, чтобы не перекрывать кнопку записи
         self.timer_label = QLabel("", self.central)
@@ -913,10 +878,7 @@ class MainWindow(QMainWindow):
         self.copy_btn.move(COMPACT_WIDTH - 24 - btn_spacing * 2, btn_y)
         self.copy_btn.clicked.connect(self._copy_last)
 
-        self.telegram_btn = TelegramButton(self.central)
-        self.telegram_btn.move(COMPACT_WIDTH - 24 - btn_spacing * 3, btn_y)
-
-        self._corner_btns = [self.telegram_btn, self.copy_btn, self.settings_btn, self.close_btn]
+        self._corner_btns = [self.copy_btn, self.settings_btn, self.close_btn]
         self._set_corner_opacity(0.0)
 
         # Recording timer
@@ -930,11 +892,17 @@ class MainWindow(QMainWindow):
     def enterEvent(self, event):
         self._hover = True
         self._set_corner_opacity(0.7)
+        # Показываем статус "Готово" при наведении
+        if self.status_label.text() == "Готово":
+            self.status_label.show()
         super().enterEvent(event)
 
     def leaveEvent(self, event):
         self._hover = False
         self._set_corner_opacity(0.0)
+        # Скрываем статус "Готово" когда мышка ушла
+        if self.status_label.text() == "Готово":
+            self.status_label.hide()
         super().leaveEvent(event)
 
     def _setup_tray(self):
@@ -978,6 +946,7 @@ class MainWindow(QMainWindow):
             try:
                 pyperclip.copy(text)
                 self.status_label.setText("Скопировано!")
+                self.status_label.show()  # Показываем статус копирования
                 QTimer.singleShot(1500, self._restore_status_after_copy)
             except:
                 pass
@@ -986,6 +955,9 @@ class MainWindow(QMainWindow):
         """Восстановить статус после копирования."""
         if not self._recording:
             self.status_label.setText("Готово")
+            # Скрываем "Готово" если нет hover
+            if not self._hover:
+                self.status_label.hide()
 
     def _show_text_popup(self, text: str):
         """Показать всплывающую панель с текстом сверху окна."""
@@ -1111,6 +1083,7 @@ class MainWindow(QMainWindow):
             self._recording = True
             self._rec_start = time.time()
             self.status_label.setText("Слушаю")
+            self.status_label.show()  # Показываем статус при записи
             self.timer_label.setText("0.0с")
             self.timer_label.show()
             self.record_btn.set_recording(True)
@@ -1154,12 +1127,16 @@ class MainWindow(QMainWindow):
 
         if audio is None or len(audio) == 0 or self.recorder.get_duration(audio) < 0.5:
             self.status_label.setText("Готово")
+            # Скрываем "Готово" если нет hover
+            if not self._hover:
+                self.status_label.hide()
             self._processing = False  # Разблокируем
             with open("debug.log", "a") as f:
                 f.write(f"[DEBUG] _stop(): audio too short, _processing set to False\n")
             return
 
         self.status_label.setText("Обработка...")
+        self.status_label.show()  # Показываем статус при обработке
         self._transcription_start = time.time()  # Фиксируем начало транскрибации
 
         # Cleanup previous thread if exists
@@ -1195,6 +1172,7 @@ class MainWindow(QMainWindow):
         self.record_btn.set_recording(False)
         self.tray_rec.setText("Запись")
         self.status_label.setText("Отменено")
+        self.status_label.show()  # Показываем статус отмены
 
         # Скрываем кнопку отмены, показываем кнопку закрытия
         self.cancel_btn.hide()
@@ -1223,6 +1201,9 @@ class MainWindow(QMainWindow):
 
         # Показываем время записи → время транскрибации на 2 секунды
         self.status_label.setText("Готово")
+        # Скрываем "Готово" если нет hover
+        if not self._hover:
+            self.status_label.hide()
         self.timer_label.setText(f"{self._rec_duration:.1f}→{transcription_time:.1f}с")
         self.timer_label.show()
         QTimer.singleShot(2000, self._hide_timer_after_done)
@@ -1267,6 +1248,7 @@ class MainWindow(QMainWindow):
 
         self._processing = False  # Разблокируем
         self.status_label.setText("Ошибка")
+        self.status_label.show()  # Показываем статус ошибки
 
         # Возвращаем кнопку закрытия при ошибке
         self.cancel_btn.hide()
@@ -1290,6 +1272,11 @@ class MainWindow(QMainWindow):
 
     def _set_status(self, msg):
         self.status_label.setText(msg)
+        # "Готово" скрывается без hover, остальные статусы видны всегда
+        if msg == "Готово" and not self._hover:
+            self.status_label.hide()
+        else:
+            self.status_label.show()
 
     def _set_level(self, level):
         if self._recording:
@@ -1302,6 +1289,7 @@ class MainWindow(QMainWindow):
             try:
                 pyperclip.copy(text)
                 self.status_label.setText("Скопировано!")
+                self.status_label.show()  # Показываем статус копирования
                 QTimer.singleShot(1500, self._restore_status_after_copy)
             except:
                 pass
