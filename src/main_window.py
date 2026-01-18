@@ -148,21 +148,30 @@ QTabBar::tab:selected {{
 
 
 class TranscriptionThread(QThread):
-    finished = pyqtSignal(str, float)
-    error = pyqtSignal(str)
+    transcription_done = pyqtSignal(str, float)  # Renamed to avoid conflict with QThread.finished
+    transcription_error = pyqtSignal(str)
 
     def __init__(self, transcriber, audio, sample_rate: int):
         super().__init__()
         self.transcriber = transcriber
         self.audio = audio
         self.sample_rate = sample_rate
+        self._is_cancelled = False
 
     def run(self):
         try:
+            if self._is_cancelled:
+                return
             text, duration = self.transcriber.transcribe(self.audio, self.sample_rate)
-            self.finished.emit(text, duration)
+            if not self._is_cancelled:
+                self.transcription_done.emit(text, duration)
         except Exception as e:
-            self.error.emit(str(e))
+            if not self._is_cancelled:
+                self.transcription_error.emit(str(e))
+
+    def cancel(self):
+        """Mark thread as cancelled to prevent signal emission after stop."""
+        self._is_cancelled = True
 
 
 class RecordButton(QPushButton):
@@ -795,6 +804,7 @@ class MainWindow(QMainWindow):
         self._last_toggle_time = 0.0  # Для debounce
         self._last_text = ""
         self._hover = False
+        self._shutting_down = False  # Флаг для безопасного завершения
 
         self._setup_ui()
         self._setup_tray()
@@ -992,13 +1002,45 @@ class MainWindow(QMainWindow):
     def _load_model(self):
         threading.Thread(target=self.transcriber.load_model, daemon=True).start()
 
+    def _cleanup_thread(self):
+        """Safely cleanup the transcription thread."""
+        if self._thread is not None:
+            try:
+                # Cancel thread to prevent signal emission
+                self._thread.cancel()
+                # Disconnect signals to prevent callbacks to deleted objects
+                try:
+                    self._thread.transcription_done.disconnect()
+                    self._thread.transcription_error.disconnect()
+                    self._thread.finished.disconnect()
+                except (TypeError, RuntimeError):
+                    pass  # Already disconnected
+                # Wait for thread to finish (with timeout)
+                if self._thread.isRunning():
+                    self._thread.wait(2000)  # 2 second timeout
+                # Schedule for deletion
+                self._thread.deleteLater()
+            except RuntimeError:
+                pass  # Thread already deleted
+            self._thread = None
+
+    def _on_thread_finished(self):
+        """Called when QThread finishes (after run() completes)."""
+        # This is called from QThread.finished signal
+        # We schedule deleteLater here for safety
+        if self._thread is not None and not self._shutting_down:
+            try:
+                self._thread.deleteLater()
+            except RuntimeError:
+                pass
+
     def _on_audio_level(self, level):
         try:
-            # Проверяем что окно ещё существует
-            if not sip.isdeleted(self):
+            # Проверяем что окно ещё существует и не закрывается
+            if not self._shutting_down and not sip.isdeleted(self):
                 self.audio_level_update.emit(min(1.0, level * 10))
-        except:
-            pass
+        except (RuntimeError, AttributeError):
+            pass  # Widget destroyed or shutting down
 
     def _on_progress(self, msg):
         self.status_update.emit(msg)
@@ -1092,9 +1134,14 @@ class MainWindow(QMainWindow):
 
         self.status_label.setText("Обработка...")
         self._transcription_start = time.time()  # Фиксируем начало транскрибации
+
+        # Cleanup previous thread if exists
+        self._cleanup_thread()
+
         self._thread = TranscriptionThread(self.transcriber, audio, self.config.sample_rate)
-        self._thread.finished.connect(self._done)
-        self._thread.error.connect(self._error)
+        self._thread.transcription_done.connect(self._done)
+        self._thread.transcription_error.connect(self._error)
+        self._thread.finished.connect(self._on_thread_finished)  # QThread.finished for cleanup
         self._thread.start()
 
         with open("debug.log", "a") as f:
@@ -1136,6 +1183,10 @@ class MainWindow(QMainWindow):
     def _done(self, text, duration):
         with open("debug.log", "a") as f:
             f.write(f"[DEBUG] _done() called, setting _processing=False, text_len={len(text)}\n")
+
+        # Check if we're shutting down
+        if self._shutting_down:
+            return
 
         self._processing = False  # Разблокируем
         self._last_text = text
@@ -1183,12 +1234,19 @@ class MainWindow(QMainWindow):
             self.timer_label.hide()
 
     def _error(self, err):
+        # Check if we're shutting down
+        if self._shutting_down:
+            return
+
         self._processing = False  # Разблокируем
         self.status_label.setText("Ошибка")
 
         # Возвращаем кнопку закрытия при ошибке
         self.cancel_btn.hide()
         self.close_btn.show()
+
+        with open("debug.log", "a") as f:
+            f.write(f"[DEBUG] _error() called: {err}\n")
 
     def _type(self, text):
         try:
@@ -1309,6 +1367,20 @@ class MainWindow(QMainWindow):
         self.hide()
 
     def _quit(self):
+        self._shutting_down = True
+
+        # Stop recording if in progress
+        if self._recording:
+            self._recording = False
+            self._rec_timer.stop()
+            try:
+                self.recorder.stop()
+            except Exception:
+                pass
+
+        # Cleanup transcription thread
+        self._cleanup_thread()
+
         self.hotkey_manager.unregister()
         self.mouse_handler.stop()
         self.tray.hide()
