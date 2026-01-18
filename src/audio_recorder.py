@@ -33,24 +33,36 @@ class AudioRecorder:
         self.mic_boost = mic_boost
 
         self._recording = False
+        self._shutting_down = False  # Flag to prevent callbacks during shutdown
         self._audio_queue: queue.Queue = queue.Queue()
         self._audio_data: list = []
         self._stream: Optional[sd.InputStream] = None
         self._lock = threading.Lock()
+        self._collect_thread: Optional[threading.Thread] = None
 
     def _audio_callback(self, indata, frames, time_info, status):
         """Callback for audio stream."""
+        # Early exit if shutting down
+        if self._shutting_down or not self._recording:
+            return
+
         if status:
             print(f"Audio status: {status}")
 
         # Copy audio data
         data = indata.copy()
-        self._audio_queue.put(data)
+        try:
+            self._audio_queue.put_nowait(data)
+        except queue.Full:
+            pass  # Drop frame if queue is full
 
         # Calculate audio level for visualization
-        if self.on_level_update:
-            level = np.abs(data).mean()
-            self.on_level_update(float(level))
+        if self.on_level_update and not self._shutting_down:
+            try:
+                level = np.abs(data).mean()
+                self.on_level_update(float(level))
+            except Exception:
+                pass  # Ignore errors in callback
 
     def start(self) -> bool:
         """Start recording audio."""
@@ -63,8 +75,15 @@ class AudioRecorder:
                 return True
 
             try:
+                # Reset state
                 self._audio_data = []
                 self._audio_queue = queue.Queue()
+                self._shutting_down = False
+
+                # Ensure previous collect thread is stopped
+                if self._collect_thread is not None and self._collect_thread.is_alive():
+                    self._collect_thread.join(timeout=1.0)
+                self._collect_thread = None
 
                 # Prepare device parameter (None = system default)
                 device_param = None if self.device == -1 else self.device
@@ -81,22 +100,26 @@ class AudioRecorder:
                 self._recording = True
 
                 # Start thread to collect audio data
-                self._collect_thread = threading.Thread(target=self._collect_audio)
+                self._collect_thread = threading.Thread(target=self._collect_audio, daemon=True)
                 self._collect_thread.start()
 
                 return True
             except Exception as e:
                 print(f"Failed to start recording: {e}")
+                self._shutting_down = False
                 return False
 
     def _collect_audio(self):
         """Collect audio data from queue."""
-        while self._recording:
+        while self._recording and not self._shutting_down:
             try:
                 data = self._audio_queue.get(timeout=0.1)
-                self._audio_data.append(data)
+                if not self._shutting_down:
+                    self._audio_data.append(data)
             except queue.Empty:
                 continue
+            except Exception:
+                break  # Exit on any error
 
     def stop(self) -> Optional[np.ndarray]:
         """Stop recording and return audio data."""
@@ -104,16 +127,23 @@ class AudioRecorder:
             if not self._recording:
                 return None
 
+            # Signal that we're stopping
             self._recording = False
+            self._shutting_down = True
 
+            # Stop the stream first to prevent more callbacks
             if self._stream:
-                self._stream.stop()
-                self._stream.close()
+                try:
+                    self._stream.stop()
+                    self._stream.close()
+                except Exception:
+                    pass  # Ignore errors during cleanup
                 self._stream = None
 
             # Wait for collect thread
-            if hasattr(self, '_collect_thread'):
-                self._collect_thread.join(timeout=1.0)
+            if self._collect_thread is not None and self._collect_thread.is_alive():
+                self._collect_thread.join(timeout=2.0)
+            self._collect_thread = None
 
             # Drain remaining queue
             while not self._audio_queue.empty():
@@ -122,11 +152,17 @@ class AudioRecorder:
                 except queue.Empty:
                     break
 
+            # Reset shutdown flag for next recording
+            self._shutting_down = False
+
             if not self._audio_data:
                 return None
 
             # Concatenate all audio data
-            audio = np.concatenate(self._audio_data, axis=0)
+            try:
+                audio = np.concatenate(self._audio_data, axis=0)
+            except ValueError:
+                return None  # Empty or incompatible arrays
 
             # Apply software boost if needed
             if self.mic_boost != 1.0:
