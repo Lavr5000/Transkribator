@@ -38,7 +38,7 @@ class Config:
 
     # Behavior settings
     auto_copy: bool = False  # Auto copy to clipboard (DISABLED: causes Claude Code crashes)
-    auto_paste: bool = True  # Auto paste after transcription (SAFE: uses keyboard simulation, not clipboard)
+    auto_paste: bool = False  # Auto paste DISABLED (types into ANY focused window, causes Claude Code crashes)
     auto_enter: bool = False  # Press Enter after paste
 
     # UI settings
