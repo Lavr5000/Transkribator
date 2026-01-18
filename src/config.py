@@ -37,8 +37,8 @@ class Config:
     enable_mouse_button: bool = False  # Enable mouse button recording
 
     # Behavior settings
-    auto_copy: bool = True  # Auto copy to clipboard
-    auto_paste: bool = True  # Auto paste after transcription
+    auto_copy: bool = False  # Auto copy to clipboard (DISABLED: causes Claude Code crashes)
+    auto_paste: bool = False  # Auto paste after transcription (DISABLED: requires clipboard)
     auto_enter: bool = False  # Press Enter after paste
 
     # UI settings
