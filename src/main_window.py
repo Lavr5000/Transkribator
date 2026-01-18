@@ -817,7 +817,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.central)
 
         # Telegram channel label - always visible, clickable
-        self.brand_label = ClickableLabel("NoCodeiFounder", "https://t.me/NoCodeiFounder", self.central)
+        self.brand_label = ClickableLabel("NoCodeiFounder", "https://t.me/ai_vibes_coding_ru", self.central)
         self.brand_label.setStyleSheet(f"""
             QLabel {{
                 color: #{COLORS_HEX['text_secondary']};
