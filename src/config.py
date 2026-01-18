@@ -37,9 +37,14 @@ class Config:
     enable_mouse_button: bool = False  # Enable mouse button recording
 
     # Behavior settings
-    auto_copy: bool = False  # Auto copy to clipboard (DISABLED: causes Claude Code crashes)
-    auto_paste: bool = False  # Auto paste DISABLED (types into ANY focused window, causes Claude Code crashes)
+    auto_copy: bool = True  # Auto copy to clipboard
+    auto_paste: bool = True  # Auto paste to focused window
     auto_enter: bool = False  # Press Enter after paste
+
+    # Paste method: "clipboard" (safe, uses Ctrl+Shift+V) or "type" (legacy, types characters)
+    # "clipboard" is recommended - it's faster and doesn't crash terminal apps like Claude Code
+    paste_method: str = "clipboard"  # clipboard | type
+    paste_delay: float = 0.15  # Delay before paste (seconds) - allows window focus to settle
 
     # UI settings
     always_on_top: bool = True
@@ -162,4 +167,10 @@ MOUSE_BUTTONS = {
     "right": "Правая кнопка",
     "x1": "Кнопка X1 (вперед)",
     "x2": "Кнопка X2 (назад)",
+}
+
+# Available paste methods
+PASTE_METHODS = {
+    "clipboard": "Clipboard + Ctrl+Shift+V (рекомендуется)",
+    "type": "Посимвольный ввод (может вызывать краши)",
 }

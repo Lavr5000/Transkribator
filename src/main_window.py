@@ -19,10 +19,10 @@ from PyQt6.QtGui import (
 )
 from PyQt6 import sip
 
-from .config import Config, WHISPER_MODELS, SHERPA_MODELS, PODLODKA_MODELS, LANGUAGES, BACKENDS, MOUSE_BUTTONS
+from .config import Config, WHISPER_MODELS, SHERPA_MODELS, PODLODKA_MODELS, LANGUAGES, BACKENDS, MOUSE_BUTTONS, PASTE_METHODS
 from .audio_recorder import AudioRecorder
 from .transcriber import Transcriber, get_available_backends
-from .hotkeys import HotkeyManager, type_text
+from .hotkeys import HotkeyManager, type_text, safe_paste_text, paste_from_clipboard
 from .history_manager import HistoryManager
 from .mouse_handler import MouseButtonHandler
 
@@ -646,6 +646,18 @@ class SettingsDialog(QDialog):
 
         self.auto_copy_cb = QCheckBox("Авто-копирование")
         self.auto_paste_cb = QCheckBox("Авто-вставка")
+
+        # Paste method selection
+        paste_method_label = QLabel("Метод вставки:")
+        paste_method_label.setStyleSheet("margin-top: 5px;")
+        self.paste_method_combo = QComboBox()
+        for mid, mname in PASTE_METHODS.items():
+            self.paste_method_combo.addItem(mname, mid)
+        if self.config and self.config.paste_method in PASTE_METHODS:
+            self.paste_method_combo.setCurrentIndex(
+                list(PASTE_METHODS.keys()).index(self.config.paste_method)
+            )
+
         self.always_top_cb = QCheckBox("Поверх окон")
         self.post_process_cb = QCheckBox("Пост-обработка")
 
@@ -657,6 +669,8 @@ class SettingsDialog(QDialog):
 
         behavior_layout.addWidget(self.auto_copy_cb)
         behavior_layout.addWidget(self.auto_paste_cb)
+        behavior_layout.addWidget(paste_method_label)
+        behavior_layout.addWidget(self.paste_method_combo)
         behavior_layout.addWidget(self.always_top_cb)
         behavior_layout.addWidget(self.post_process_cb)
         scroll_layout.addWidget(behavior_group)
@@ -1262,10 +1276,17 @@ class MainWindow(QMainWindow):
             f.write(f"[DEBUG] _error() called: {err}\n")
 
     def _type(self, text):
+        """Paste or type text based on config.paste_method."""
         try:
-            type_text(text)
+            if self.config.paste_method == "clipboard":
+                # Safe method: copy to clipboard + Ctrl+Shift+V
+                # This doesn't crash terminal apps like Claude Code
+                safe_paste_text(text, use_terminal_shortcut=True, delay_before_paste=self.config.paste_delay)
+            else:
+                # Legacy method: type characters one by one (can crash Claude Code!)
+                type_text(text)
         except Exception as e:
-            pass
+            print(f"Paste/type error: {e}")
 
     def _set_status(self, msg):
         self.status_label.setText(msg)
@@ -1298,6 +1319,7 @@ class MainWindow(QMainWindow):
             self._settings.lang_combo.currentIndexChanged.connect(self._lang_changed)
             self._settings.auto_copy_cb.toggled.connect(lambda c: setattr(self.config, 'auto_copy', c) or self.config.save())
             self._settings.auto_paste_cb.toggled.connect(lambda c: setattr(self.config, 'auto_paste', c) or self.config.save())
+            self._settings.paste_method_combo.currentIndexChanged.connect(self._paste_method_changed)
             self._settings.always_top_cb.toggled.connect(self._top_changed)
             self._settings.post_process_cb.toggled.connect(self._post_changed)
             self._settings.enable_mouse_button_cb.toggled.connect(self._on_mouse_setting_changed)
@@ -1329,6 +1351,13 @@ class MainWindow(QMainWindow):
         self.config.language = lid
         self.config.save()
         self.transcriber.language = lid if lid != "auto" else None
+
+    def _paste_method_changed(self):
+        """Handle paste method change."""
+        method = self._settings.paste_method_combo.currentData()
+        if method and method != self.config.paste_method:
+            self.config.paste_method = method
+            self.config.save()
 
     def _top_changed(self, checked):
         self.config.always_on_top = checked

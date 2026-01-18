@@ -197,6 +197,8 @@ def get_available_backend() -> Optional[str]:
 def type_text(text: str, interval: float = 0.0) -> None:
     """
     Type text using keyboard simulation.
+    WARNING: This can crash terminal apps like Claude Code!
+    Consider using paste_from_clipboard() instead.
 
     Args:
         text: Text to type
@@ -219,3 +221,93 @@ def type_text(text: str, interval: float = 0.0) -> None:
                     time.sleep(interval)
         except Exception as e:
             print(f"Failed to type text: {e}")
+
+
+def paste_from_clipboard(use_terminal_shortcut: bool = True) -> bool:
+    """
+    Simulate paste keyboard shortcut (Ctrl+V or Ctrl+Shift+V for terminals).
+    This is SAFER than type_text() for terminal apps like Claude Code.
+
+    The text should already be in clipboard before calling this.
+
+    Args:
+        use_terminal_shortcut: If True, uses Ctrl+Shift+V (terminal paste),
+                              otherwise uses Ctrl+V (standard paste)
+
+    Returns:
+        True if paste simulation was successful
+    """
+    import time
+
+    if HOTKEY_BACKEND == "keyboard":
+        try:
+            if use_terminal_shortcut:
+                # Terminal paste: Ctrl+Shift+V
+                keyboard.press_and_release('ctrl+shift+v')
+            else:
+                # Standard paste: Ctrl+V
+                keyboard.press_and_release('ctrl+v')
+            return True
+        except Exception as e:
+            print(f"Failed to simulate paste: {e}")
+            return False
+
+    elif HOTKEY_BACKEND == "pynput":
+        try:
+            from pynput.keyboard import Controller, Key
+            kb = Controller()
+
+            if use_terminal_shortcut:
+                # Terminal paste: Ctrl+Shift+V
+                with kb.pressed(Key.ctrl):
+                    with kb.pressed(Key.shift):
+                        kb.press('v')
+                        time.sleep(0.05)
+                        kb.release('v')
+            else:
+                # Standard paste: Ctrl+V
+                with kb.pressed(Key.ctrl):
+                    kb.press('v')
+                    time.sleep(0.05)
+                    kb.release('v')
+            return True
+        except Exception as e:
+            print(f"Failed to simulate paste: {e}")
+            return False
+
+    return False
+
+
+def safe_paste_text(text: str, use_terminal_shortcut: bool = True, delay_before_paste: float = 0.1) -> bool:
+    """
+    Safely paste text by copying to clipboard first, then simulating paste shortcut.
+    This is the RECOMMENDED method for pasting into terminal apps like Claude Code.
+
+    Args:
+        text: Text to paste
+        use_terminal_shortcut: If True, uses Ctrl+Shift+V (terminal), else Ctrl+V
+        delay_before_paste: Delay in seconds before simulating paste (allows focus settling)
+
+    Returns:
+        True if operation was successful
+    """
+    import time
+
+    try:
+        import pyperclip
+        # Copy text to clipboard
+        pyperclip.copy(text)
+
+        # Small delay to ensure clipboard is ready and window focus is stable
+        if delay_before_paste > 0:
+            time.sleep(delay_before_paste)
+
+        # Simulate paste shortcut
+        return paste_from_clipboard(use_terminal_shortcut)
+    except ImportError:
+        print("pyperclip not available, falling back to type_text")
+        type_text(text)
+        return True
+    except Exception as e:
+        print(f"Failed to safe paste: {e}")
+        return False
