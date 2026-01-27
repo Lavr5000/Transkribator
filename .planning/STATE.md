@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-01-27)
 ## Current Position
 
 Phase: 2 of 4 (Noise Reduction + VAD)
-Plan: 3 of 5 in current phase
+Plan: 4 of 5 in current phase
 Status: In progress
-Last activity: 2026-01-27 — Completed 02-03: Silero VAD Integration
+Last activity: 2026-01-27 — Completed 02-02: WebRTC AGC Migration
 
-Progress: [██████░░░░░░░░░░░░░░░░░░░░░░] 60%
+Progress: [███████░░░░░░░░░░░░░░░░░░░░] 80%
 
 ## Performance Metrics
 
@@ -71,6 +71,8 @@ Recent decisions affecting current work:
 - [02-02]: AGC target level set to -3 dBFS for optimal headroom without clipping
 - [02-02]: Initial gain adjustment set to 10 dB for quiet microphone boost
 - [02-02]: AGC uses RMS-based level detection with 100ms attack time
+- [02-02]: mic_boost deprecated (default changed from 20.0 to 1.0)
+- [02-02]: Software boost only applies when webrtc_enabled=False (prevents double-boosting)
 - [02-03]: Silero VAD integrated via sherpa_onnx.OfflineVad for speech detection
 - [02-03]: VAD threshold=0.5, min_silence=800ms, min_speech=500ms for Russian speech patterns
 - [02-03]: VAD model auto-downloads from HuggingFace (csukuangfj/sherpa-onnx-silero-vad)
@@ -97,8 +99,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-01-27 18:28 UTC
-Stopped at: Completed 02-03 (Silero VAD Integration)
+Last session: 2026-01-27 18:32 UTC
+Stopped at: Completed 02-02 (WebRTC AGC Migration)
 Resume file: None
 
 ---
