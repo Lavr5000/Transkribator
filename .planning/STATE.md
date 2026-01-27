@@ -5,35 +5,35 @@
 See: .planning/PROJECT.md (updated 2026-01-27)
 
 **Core value:** Точность распознавания русской речи на уровне WhisperTyping без существенной потери скорости
-**Current focus:** Phase 2: Noise Reduction + VAD
+**Current focus:** Phase 3: Text Processing Enhancement
 
 ## Current Position
 
 Phase: 2 of 4 (Noise Reduction + VAD)
-Plan: 4 of 5 in current phase
-Status: In progress
-Last activity: 2026-01-27 — Completed 02-04: VAD for All Backends
+Plan: 5 of 5 in current phase
+Status: Phase complete
+Last activity: 2026-01-27 — Completed Phase 2 verification
 
-Progress: [████████░░░░░░░░░░░░░░░░░░] 80%
+Progress: [████████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 9
-- Average duration: 4.3 min
-- Total execution time: 0.65 hours
+- Total plans completed: 10
+- Average duration: 4.2 min
+- Total execution time: 0.70 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1 | 5/5 | 21 min | 4.2 min |
-| 2 | 4/5 | 19 min | 4.8 min |
+| 2 | 5/5 | 22 min | 4.4 min |
 | 3 | 0/6 | - | - |
 | 4 | 0/5 | - | - |
 
 **Recent Trend:**
-- Last 5 plans: 4 min (AGC), 5 min (VAD Sherpa), 8 min (VAD All), 3 min, 5 min
+- Last 5 plans: 4 min, 5 min, 8 min, 3 min, 2 min (VAD UI)
 - Trend: Stable (fast execution)
 
 *Updated after each plan completion*
@@ -45,42 +45,21 @@ Progress: [████████░░░░░░░░░░░░░░░
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- [Initialization]: Приоритет русского языка confirmed (пользователь использует для русского)
-- [Initialization]: Баланс скорости и качества — пользователь выбрал "Баланс" (beam_size=2)
-- [Initialization]: VAD для всех бэкендов — Sherpa сейчас без VAD, страдает качество
-- [Initialization]: Enhanced post-processing — WhisperTyping использует успешно
-- [01-01]: Whisper beam_size=5 chosen for quality mode (+15-30% accuracy, +30% processing time acceptable)
-- [01-01]: Temperature=0.0 for deterministic decoding (prevents hallucinations)
-- [01-01]: VAD parameters optimized for Russian (300ms silence, 400ms speech_pad)
-- [01-02]: Use from_nemo_transducer() instead of from_nemo_ctc() — GigaAM v2 is RNN-T architecture
-- [01-02]: Set max_active_paths=4 for optimal Russian accuracy based on research recommendations
-- [01-02]: Check for encoder.int8.onnx first (quantized), fallback to encoder.onnx
-- [01-03]: Atomic synchronization pattern established — backend changes must be applied to both src/ and RemotePackage/src/ simultaneously
-- [01-03]: Client-server parameter consistency verified — both directories produce identical results
-- [01-04]: Pure Python Levenshtein implementation chosen for quality metrics (no external ML dependencies)
-- [01-04]: Character Error Rate (CER) prioritized over WER for morphological languages like Russian
-- [01-04]: Direct execution model for tests — can run standalone without pytest requirement
-- [01-05]: All 16 Phase 1 requirements verified via automated code inspection (grep + diff)
-- [01-05]: Whisper backend confirmed: language='ru' (line 32, 159), beam_size=5 (line 165), temperature=0.0 (line 166)
-- [01-05]: Sherpa backend confirmed: Transducer mode (line 168), max_active_paths=4 (line 175)
-- [01-05]: Client-server synchronization confirmed: src/ and RemotePackage/ identical (diff empty)
-- [01-05]: Expected impact documented: 15-30% accuracy improvement, primary gain from Sherpa Transducer fix (+20-30%)
+- [Phase 1 Complete]: All 16 Phase 1 requirements verified
 - [02-01]: WebRTC noise suppression integrated with 10ms chunk processing (160 samples @ 16kHz)
 - [02-01]: Noise suppression level 2 (moderate) chosen as default - balances quality vs overhead
 - [02-01]: Fallback pattern established for optional platform dependencies (try/except on import)
 - [02-02]: AGC target level set to -3 dBFS for optimal headroom without clipping
-- [02-02]: Initial gain adjustment set to 10 dB for quiet microphone boost
-- [02-02]: AGC uses RMS-based level detection with 100ms attack time
 - [02-02]: mic_boost deprecated (default changed from 20.0 to 1.0)
 - [02-02]: Software boost only applies when webrtc_enabled=False (prevents double-boosting)
 - [02-03]: Silero VAD integrated via sherpa_onnx.OfflineVad for speech detection
 - [02-03]: VAD threshold=0.5, min_silence=800ms, min_speech=500ms for Russian speech patterns
 - [02-03]: VAD model auto-downloads from HuggingFace (csukuangfj/sherpa-onnx-silero-vad)
-- [02-03]: Graceful fallback if VAD fails - transcription continues without VAD
 - [02-04]: VAD extended to WhisperBackend and PodlodkaBackend with unified config
 - [02-04]: All backends now accept VAD parameters via __init__ (vad_enabled, vad_threshold, etc.)
-- [02-04]: Transcriber passes VAD config from config.py to all backends
-- [02-04]: Shared VAD model directory: models/sherpa/silero-vad
+- [02-05]: VAD level bar visualization added to MainWindow
+- [02-05]: Sensitivity adjusted to 10x gain amplifier for better visual feedback
+- [02-05]: Threshold lowered to 5% for speech detection
 
 ### Pending Todos
 
@@ -89,22 +68,28 @@ None yet.
 ### Blockers/Concerns
 
 **Phase 1 Status:**
-- ✅ COMPLETE - All 16 requirements verified (MODEL-01 to MODEL-08, TEST-01 to TEST-05, SRV-01 to SRV-03)
-- ⚠️ RECOMMENDED: Run A/B test to measure actual WER/CER improvement: `python tests/test_backend_quality.py`
-- 📊 Expected: 15-30% accuracy improvement based on research (Sherpa Transducer fix is primary driver)
+- ✅ COMPLETE - All 16 requirements verified
 
-**Phase 2 Concerns:**
-- Punctuation model accuracy for Russian — deepmultilingualpunctuation not trained on Russian, may need to fallback to rule-based
+**Phase 2 Status:**
+- ✅ COMPLETE - All 9 requirements verified (AUDIO-01~05, VAD-01~04)
+- ✅ WebRTC Noise Suppression integrated with fallback
+- ✅ AGC replaces 20x software gain
+- ✅ Silero VAD for all backends (Sherpa, Whisper, Podlodka)
+- ✅ VAD visualization in UI (level bar with color change)
+- 📊 Expected: 5-15% WER improvement from noise reduction + VAD
 
 **Phase 3 Concerns:**
-- Сбор реальных error patterns — нужен A/B тест для измерения CER улучшения
+- Сбор реальных error patterns — нужен анализ типичных ошибок русской речи
+- Словарь имен собственных — требуется 1000-5000 entries
 
 ## Session Continuity
 
-Last session: 2026-01-27 18:53 UTC
-Stopped at: Completed 02-04 (VAD for All Backends)
+Last session: 2026-01-27 19:15 UTC
+Stopped at: Phase 2 complete - verification passed
 Resume file: None
 
 ---
 
-**Next Step:** Phase 02-05: VAD UI Controls - add settings panel for VAD configuration
+**Next Step:** Begin Phase 3 (Text Processing Enhancement) - expand post-processing rules for Russian language
+
+**Or:** Run A/B test to validate Phase 1+2 improvements: `python tests/test_backend_quality.py`

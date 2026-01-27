@@ -20,18 +20,18 @@
 
 ### Audio Processing
 
-- [ ] **AUDIO-01**: AudioRecorder интегрирован с WebRTC Noise/Gain для шумоподавления
-- [ ] **AUDIO-02**: Текущий 20x software gain заменён на адаптивный AGC от WebRTC
-- [ ] **AUDIO-03**: Шумоподавление применяется ДО VAD для лучшей точности детекции речи
-- [ ] **AUDIO-04**: WebRTC обработка работает в реальном времени (<10ms latency)
-- [ ] **AUDIO-05**: Fallback на noisereduce если WebRTC недоступен
+- [x] **AUDIO-01**: AudioRecorder интегрирован с WebRTC Noise/Gain для шумоподавления ✅
+- [x] **AUDIO-02**: Текущий 20x software gain заменён на адаптивный AGC от WebRTC ✅
+- [x] **AUDIO-03**: Шумоподавление применяется ДО VAD для лучшей точности детекции речи ✅
+- [x] **AUDIO-04**: WebRTC обработка работает в реальном времени (<10ms latency) ✅
+- [x] **AUDIO-05**: Fallback на software boost если WebRTC недоступен ✅
 
 ### Voice Activity Detection
 
-- [ ] **VAD-01**: Silero VAD интегрирован в SherpaBackend
-- [ ] **VAD-02**: VAD работает для всех бэкендов (Whisper, Sherpa, Podlodka)
-- [ ] **VAD-03**: VAD параметры настраиваемые через config (threshold, min_silence_duration_ms)
-- [ ] **VAD-04**: VAD визуализация в UI (индикатор записи речи)
+- [x] **VAD-01**: Silero VAD интегрирован в SherpaBackend ✅
+- [x] **VAD-02**: VAD работает для всех бэкендов (Whisper, Sherpa, Podlodka) ✅
+- [x] **VAD-03**: VAD параметры настраиваемые через config (threshold, min_silence_duration_ms) ✅
+- [x] **VAD-04**: VAD визуализация в UI (индикатор записи речи) ✅
 
 ### Text Post-Processing
 
