@@ -65,7 +65,7 @@ class AudioRecorder:
                 self.webrtc_enabled = False
 
     def _audio_callback(self, indata, frames, time_info, status):
-        """Callback for audio stream."""
+        """Callback for audio stream - applies WebRTC noise suppression if enabled."""
         # Early exit if shutting down
         if self._shutting_down or not self._recording:
             return
@@ -75,12 +75,44 @@ class AudioRecorder:
 
         # Copy audio data
         data = indata.copy()
+
+        # Apply WebRTC processing if enabled (real-time noise suppression)
+        if self.webrtc_enabled and self._webrtc_processor is not None:
+            try:
+                # Convert float32 [-1, 1] to int16 PCM for WebRTC
+                data_int16 = (data * 32767).astype(np.int16)
+
+                # Process in 10ms chunks (160 samples @ 16kHz)
+                # WebRTC requires exactly 10ms chunks at 16kHz
+                chunk_size = 160  # 10ms @ 16kHz
+                processed_chunks = []
+
+                for i in range(0, len(data_int16), chunk_size):
+                    chunk = data_int16[i:i + chunk_size]
+                    if len(chunk) < chunk_size:
+                        # Pad last chunk if needed
+                        chunk = np.pad(chunk, (0, chunk_size - len(chunk)), mode='constant')
+
+                    # Process 10ms chunk
+                    result = self._webrtc_processor.Process10ms(chunk.tobytes())
+                    if result.audio:
+                        processed_chunks.append(np.frombuffer(result.audio, dtype=np.int16))
+
+                if processed_chunks:
+                    # Convert back to float32 and reshape
+                    data_int16 = np.concatenate(processed_chunks)
+                    data = data_int16.astype(np.float32) / 32767.0
+                    data = data.reshape(-1, 1)  # Ensure (samples, channels) shape
+            except Exception:
+                # Fallback to original data if WebRTC fails
+                pass
+
         try:
             self._audio_queue.put_nowait(data)
         except queue.Full:
             pass  # Drop frame if queue is full
 
-        # Calculate audio level for visualization
+        # Calculate audio level for visualization (use cleaned audio)
         if self.on_level_update and not self._shutting_down:
             try:
                 level = np.abs(data).mean()
