@@ -29,7 +29,7 @@ class WhisperBackend(BaseBackend):
         model_size: str = "base",
         device: str = "auto",
         compute_type: str = "auto",
-        language: str = "auto",
+        language: str = "ru",  # Changed from "auto" - force Russian for accuracy
         on_progress: Optional[Callable[[str], None]] = None,
     ):
         super().__init__(model_size, device, compute_type, language, on_progress)
@@ -156,7 +156,7 @@ class WhisperBackend(BaseBackend):
                     except ImportError:
                         pass
 
-            language = self.language if self.language != "auto" else None
+            language = "ru"  # Force Russian for optimal accuracy
 
             if WHISPER_BACKEND == "faster-whisper":
                 segments, info = self._model.transcribe(
