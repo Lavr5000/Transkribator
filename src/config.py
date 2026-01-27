@@ -27,7 +27,9 @@ class Config:
     sample_rate: int = 16000
     channels: int = 1
     audio_device: int = -1  # -1 = system default, or specific device index
-    mic_boost: float = 20.0  # Software gain multiplier (increase if mic is too quiet)
+    mic_boost: float = 1.0  # Software gain multiplier (DEPRECATED: Use WebRTC AGC instead)
+                                # Only used when webrtc_enabled=False
+                                # 1.0 = no boost, kept for fallback compatibility
 
     # WebRTC audio processing settings
     webrtc_enabled: bool = True  # Enable WebRTC noise suppression and AGC

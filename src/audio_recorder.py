@@ -24,7 +24,16 @@ except (ImportError, OSError):
 
 
 class AudioRecorder:
-    """Records audio from the microphone."""
+    """Records audio from the microphone with WebRTC noise suppression and AGC.
+
+    When webrtc_enabled=True (default):
+    - WebRTC Noise Suppression removes background noise
+    - WebRTC AGC normalizes audio to -3 dBFS target automatically
+    - mic_boost parameter is ignored (AGC handles gain)
+
+    When webrtc_enabled=False (fallback):
+    - Raw audio capture with optional software mic_boost
+    """
 
     def __init__(
         self,
@@ -32,7 +41,7 @@ class AudioRecorder:
         channels: int = 1,
         on_level_update: Optional[Callable[[float], None]] = None,
         device: Optional[int] = None,
-        mic_boost: float = 1.0,  # Software gain (deprecated, use AGC)
+        mic_boost: float = 1.0,  # Software gain (DEPRECATED - only used when webrtc_enabled=False)
         webrtc_enabled: bool = True,
         noise_suppression_level: int = 2,
     ):
@@ -220,8 +229,9 @@ class AudioRecorder:
             except ValueError:
                 return None  # Empty or incompatible arrays
 
-            # Apply software boost if needed
-            if self.mic_boost != 1.0:
+            # Apply software boost ONLY if WebRTC AGC is not available
+            # WebRTC AGC handles gain adaptation automatically
+            if not self.webrtc_enabled and self.mic_boost != 1.0:
                 audio = audio * self.mic_boost
                 # Clip to prevent distortion
                 audio = np.clip(audio, -1.0, 1.0)
