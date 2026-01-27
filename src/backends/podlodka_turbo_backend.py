@@ -2,6 +2,7 @@
 import gc
 import threading
 import time
+from pathlib import Path
 from typing import Callable, Optional, Tuple
 import numpy as np
 
@@ -36,6 +37,11 @@ class PodlodkaTurboBackend(BaseBackend):
         compute_type: str = "auto",
         language: str = "ru",
         on_progress: Optional[Callable[[str], None]] = None,
+        # VAD parameters
+        vad_enabled: bool = False,
+        vad_threshold: float = 0.5,
+        min_silence_duration_ms: int = 800,
+        min_speech_duration_ms: int = 500,
     ):
         super().__init__(model_size, device, compute_type, language, on_progress)
         self._model = None
@@ -47,6 +53,13 @@ class PodlodkaTurboBackend(BaseBackend):
 
         # Force Russian for Podlodka-Turbo
         self.language = "ru"
+
+        # VAD (Voice Activity Detection)
+        self._vad = None
+        self._vad_enabled = vad_enabled
+        self._vad_threshold = vad_threshold
+        self._min_silence_duration_ms = min_silence_duration_ms
+        self._min_speech_duration_ms = min_speech_duration_ms
 
     def _detect_device(self) -> Tuple[str, str]:
         """Detect the best device and dtype."""
@@ -62,6 +75,25 @@ class PodlodkaTurboBackend(BaseBackend):
                 dtype = "float32"
 
         return device, dtype
+
+    def _get_vad_model_dir(self) -> Path:
+        """Get Silero VAD model directory, download if missing."""
+        from huggingface_hub import snapshot_download
+
+        vad_dir = Path(__file__).parent.parent.parent / "models" / "sherpa" / "silero-vad"
+        vad_dir.mkdir(parents=True, exist_ok=True)
+
+        if not (vad_dir / "v4.onnx").exists():
+            try:
+                snapshot_download(
+                    repo_id="csukuangfj/sherpa-onnx-silero-vad",
+                    local_dir=str(vad_dir),
+                    local_dir_use_symlinks=False,
+                )
+            except Exception as e:
+                print(f"Failed to download VAD model: {e}")
+
+        return vad_dir
 
     def load_model(self):
         """Load the Whisper-Podlodka-Turbo model using transformers."""
@@ -100,6 +132,22 @@ class PodlodkaTurboBackend(BaseBackend):
 
             # Load processor
             self._processor = AutoProcessor.from_pretrained(model_id)
+
+            # Initialize Silero VAD if enabled
+            if self._vad_enabled:
+                try:
+                    vad_dir = self._get_vad_model_dir()
+                    import sherpa_onnx
+                    self._vad = sherpa_onnx.OfflineVad(
+                        model_dir=str(vad_dir),
+                        threshold=self._vad_threshold,
+                        min_silence_duration=self._min_silence_duration_ms / 1000.0,
+                        min_speech_duration=self._min_speech_duration_ms / 1000.0,
+                    )
+                    print(f"PodlodkaBackend: VAD initialized")
+                except Exception as e:
+                    print(f"PodlodkaBackend: Failed to initialize VAD: {e}")
+                    self._vad = None
 
             if self.on_progress:
                 self.on_progress(f"Whisper-Podlodka-Turbo loaded ({device})")
@@ -145,6 +193,34 @@ class PodlodkaTurboBackend(BaseBackend):
             self.load_model()
 
         start_time = time.time()
+
+        # Apply VAD to filter silence if enabled (before transcription)
+        if self._vad_enabled and self._vad is not None:
+            try:
+                vad_stream = self._vad.create_stream()
+                vad_stream.accept_waveform(sample_rate, audio)
+                self._vad.compute(vad_stream)
+
+                segments = vad_stream.segments
+                if segments:
+                    speech_segments = []
+                    for seg in segments:
+                        start_sample = int(seg.start * sample_rate)
+                        end_sample = int(seg.end * sample_rate)
+                        start_sample = max(0, start_sample)
+                        end_sample = min(len(audio), end_sample)
+                        if end_sample > start_sample:
+                            speech_segments.append(audio[start_sample:end_sample])
+
+                    if speech_segments:
+                        audio = np.concatenate(speech_segments)
+                    else:
+                        return "", 0.0
+                else:
+                    return "", 0.0
+            except Exception as e:
+                print(f"PodlodkaBackend: VAD filtering failed: {e}")
+                # Continue with original audio on VAD failure
 
         try:
             if self.on_progress:
