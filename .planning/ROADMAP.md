@@ -38,11 +38,11 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: TBD (will be determined during planning)
 
 Plans:
-- [ ] 01-01: Fix Whisper backend parameters (language, beam_size, temperature, no_speech_threshold)
-- [ ] 01-02: Fix Sherpa backend architecture (CTC → Transducer, max_active_paths, model files)
-- [ ] 01-03: Optimize VAD parameters for Russian language
-- [ ] 01-04: Implement testing framework (WER, CER, RTF measurements)
-- [ ] 01-05: Synchronize improvements between client and server
+- [ ] 01-01-PLAN.md — Fix Whisper backend parameters (language="ru", beam_size=5, temperature=0.0, VAD optimization)
+- [ ] 01-02-PLAN.md — Fix Sherpa backend architecture (CTC → Transducer, max_active_paths=4, correct model files)
+- [ ] 01-03-PLAN.md — Synchronize improvements between client and server
+- [ ] 01-04-PLAN.md — Implement testing framework (WER, CER, RTF measurements)
+- [ ] 01-05-PLAN.md — Verify Phase 1 goal achievement
 
 ### Phase 2: Noise Reduction + VAD
 
@@ -127,9 +127,9 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Critical Bug Fixes | 0/5 | Not started | - |
+| 1. Critical Bug Fixes | 0/5 | Ready to execute | - |
 | 2. Noise Reduction + VAD | 0/5 | Not started | - |
 | 3. Text Processing Enhancement | 0/6 | Not started | - |
 | 4. Advanced Features | 0/5 | Not started | - |
 
-**Total Progress:** [░░░░░░░░░░] 0% (0/21 plans)
+**Total Progress:** [█░░░░░░░░░] 5% (5 plans created, 0/21 executed)
