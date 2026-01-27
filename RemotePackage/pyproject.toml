@@ -1,0 +1,75 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "whisper-typing"
+version = "1.0.0"
+description = "Local voice-to-text transcription app powered by Whisper"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+authors = [
+    {name = "WhisperTyping", email = "contact@whispertyping.local"}
+]
+keywords = ["whisper", "transcription", "voice", "speech-to-text", "stt"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+
+dependencies = [
+    "PyQt6>=6.5.0",
+    "sounddevice>=0.4.6",
+    "soundfile>=0.12.1",
+    "numpy>=1.24.0",
+    "faster-whisper>=1.0.0",
+    "pynput>=1.7.6",
+    "pyperclip>=1.8.2",
+    "platformdirs>=4.0.0",
+]
+
+[project.optional-dependencies]
+gpu = [
+    "torch>=2.0.0",
+    "nvidia-cudnn-cu12>=8.9.0",
+    "nvidia-cublas-cu12>=12.1.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+whisper-typing = "src.main_window:run"
+
+[project.gui-scripts]
+whisper-typing-gui = "src.main_window:run"
+
+[project.urls]
+Homepage = "https://github.com/whispertyping/whisper-typing"
+Documentation = "https://github.com/whispertyping/whisper-typing#readme"
+Issues = "https://github.com/whispertyping/whisper-typing/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.black]
+line-length = 100
+target-version = ['py39', 'py310', 'py311', 'py312']
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]

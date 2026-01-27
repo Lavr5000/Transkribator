@@ -1,0 +1,18 @@
+🤪 ЗАДАЧА ДЛЯ CLAUDE CODE НА УДАЛЁННОМ ПК
+
+## Что нужно сделать:
+
+1. Проверить что сервер НЕ запущен:
+   tasklist | findstr python
+
+2. Запустить сервер транскрибации:
+   cd C:\Users\User1\Desktop\Transcriber\TranscriberServer
+   python -m uvicorn server:app --host 0.0.0.0 --port 8000
+
+3. Проверить что порт открыт:
+   netstat -ano | findstr :8000
+
+4. Ответить в Telegram "СЕРВЕР ЗАПУЩЕН" когда готово.
+
+---
+IMPORTANT: Run this immediately! Server is DOWN and transcription is running on local laptop instead of remote PC!

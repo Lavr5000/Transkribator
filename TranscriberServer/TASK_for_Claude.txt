@@ -1,0 +1,43 @@
+ЗАДАЧА: Создать ярлык и автозагрузку для Transcriber Server
+
+ЦЕЛЬ:
+Создать ярлык на рабочем столе для запуска сервера транскрибации
+и добавить его в автозагрузку Windows.
+
+ГДЕ ВЫПОЛНЯТЬ:
+На ПК (192.168.31.119), НЕ на ноутбуке!
+
+ПАПКА:
+C:\Users\user\.claude\0 ProEKTi\Transkribator\TranscriberServer
+
+ЧТО ДЕЛАТЬ:
+
+1. Создать ярлык на рабочем столе:
+   Путь: C:\Users\user\Desktop\Transcriber Server.lnk
+   Команда: cd C:\Users\user\.claude\0 ProEKTi\Transkribator\TranscriberServer && python server.py
+
+2. Добавить в автозагрузку:
+
+   Вариант A - Через папку Startup:
+   Скопировать ярлык в:
+   C:\Users\user\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup
+
+   Вариант B - Через Task Scheduler:
+   - Имя: TranscriberServer-Autostart
+   - Триггер: AtStartup
+   - Пользователь: SYSTEM
+   - Действие: Запустить python server.py
+
+ПРОВЕРКА:
+1. Перезагрузить ПК
+2. Дождаться загрузки (2-3 мин)
+3. Проверить: tasklist | findstr python
+4. С ноутбука: curl http://192.168.31.119:8000/health
+
+РЕЗУЛЬТАТ:
+После перезагрузки сервер запускается АВТОМАТИЧЕСКИ!
+
+ВАЖНО:
+- Сервер использует модель Whisper - загрузка 1-2 минуты
+- Окно можно свернуть - работает в фоне
+- После перезагрузки сервер стартует сам
