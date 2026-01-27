@@ -1148,15 +1148,16 @@ class MainWindow(QMainWindow):
         try:
             # Проверяем что окно ещё существует и не закрывается
             if not self._shutting_down and not sip.isdeleted(self):
-                # Convert level to percentage (0-100)
-                percentage = min(100, int(level * 100))
+                # Convert level to percentage with 10x gain amplifier
+                # This makes the visual indicator more responsive
+                percentage = min(100, int(level * 1000))
 
                 # Update the level bar
                 self.vad_level_bar.setValue(percentage)
 
                 # Change color based on speech detection
-                # Threshold: >10% considered speech (adjust based on testing)
-                if percentage > 10:
+                # Threshold: >5% considered speech (lowered for better sensitivity)
+                if percentage > 5:
                     # Speech detected - Blue
                     self.vad_level_bar.setStyleSheet("""
                         QProgressBar { border: none; background-color: #1a2840; }
