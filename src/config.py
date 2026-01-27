@@ -33,6 +33,12 @@ class Config:
     webrtc_enabled: bool = True  # Enable WebRTC noise suppression and AGC
     noise_suppression_level: int = 2  # 0-4: 0=off, 1=low, 2=moderate, 3=high, 4=very high
 
+    # VAD (Voice Activity Detection) settings
+    vad_enabled: bool = True  # Enable VAD to remove silence before transcription
+    vad_threshold: float = 0.5  # Speech probability threshold (0.0-1.0)
+    min_silence_duration_ms: int = 800  # Min silence to mark speech end (milliseconds)
+    min_speech_duration_ms: int = 500  # Min speech to start detection (milliseconds)
+
     # Hotkey settings
     hotkey: str = "ctrl+shift+space"  # Global hotkey to start/stop recording
 
