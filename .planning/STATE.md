@@ -49,6 +49,9 @@ Recent decisions affecting current work:
 - [Initialization]: Баланс скорости и качества — пользователь выбрал "Баланс" (beam_size=2)
 - [Initialization]: VAD для всех бэкендов — Sherpa сейчас без VAD, страдает качество
 - [Initialization]: Enhanced post-processing — WhisperTyping использует успешно
+- [01-01]: Whisper beam_size=5 chosen for quality mode (+15-30% accuracy, +30% processing time acceptable)
+- [01-01]: Temperature=0.0 for deterministic decoding (prevents hallucinations)
+- [01-01]: VAD parameters optimized for Russian (300ms silence, 400ms speech_pad)
 - [01-02]: Use from_nemo_transducer() instead of from_nemo_ctc() — GigaAM v2 is RNN-T architecture
 - [01-02]: Set max_active_paths=4 for optimal Russian accuracy based on research recommendations
 - [01-02]: Check for encoder.int8.onnx first (quantized), fallback to encoder.onnx
