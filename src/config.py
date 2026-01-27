@@ -29,6 +29,10 @@ class Config:
     audio_device: int = -1  # -1 = system default, or specific device index
     mic_boost: float = 20.0  # Software gain multiplier (increase if mic is too quiet)
 
+    # WebRTC audio processing settings
+    webrtc_enabled: bool = True  # Enable WebRTC noise suppression and AGC
+    noise_suppression_level: int = 2  # 0-4: 0=off, 1=low, 2=moderate, 3=high, 4=very high
+
     # Hotkey settings
     hotkey: str = "ctrl+shift+space"  # Global hotkey to start/stop recording
 
