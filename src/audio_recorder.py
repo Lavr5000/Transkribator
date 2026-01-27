@@ -14,6 +14,14 @@ try:
 except (ImportError, OSError):
     AUDIO_AVAILABLE = False
 
+# WebRTC noise suppression (optional - may not be available on all platforms)
+_WEBRTC_AVAILABLE = False
+try:
+    from webrtc_noise_gain import AudioProcessor
+    _WEBRTC_AVAILABLE = True
+except (ImportError, OSError):
+    pass  # WebRTC not available, will use software boost only
+
 
 class AudioRecorder:
     """Records audio from the microphone."""
@@ -24,13 +32,18 @@ class AudioRecorder:
         channels: int = 1,
         on_level_update: Optional[Callable[[float], None]] = None,
         device: Optional[int] = None,
-        mic_boost: float = 1.0  # Software gain multiplier (1.0 = no boost, 10.0 = 10x boost)
+        mic_boost: float = 1.0,  # Software gain (deprecated, use AGC)
+        webrtc_enabled: bool = True,
+        noise_suppression_level: int = 2,
     ):
         self.sample_rate = sample_rate
         self.channels = channels
         self.on_level_update = on_level_update
         self.device = device
         self.mic_boost = mic_boost
+        self.webrtc_enabled = webrtc_enabled and _WEBRTC_AVAILABLE
+        self.noise_suppression_level = noise_suppression_level
+        self._webrtc_processor = None
 
         self._recording = False
         self._shutting_down = False  # Flag to prevent callbacks during shutdown
@@ -39,6 +52,17 @@ class AudioRecorder:
         self._stream: Optional[sd.InputStream] = None
         self._lock = threading.Lock()
         self._collect_thread: Optional[threading.Thread] = None
+
+        # Initialize WebRTC processor if enabled
+        if self.webrtc_enabled:
+            try:
+                self._webrtc_processor = AudioProcessor(
+                    auto_gain_dbfs=3,  # Target -16 dBFS (will be configured in 02-02)
+                    noise_suppression_level=self.noise_suppression_level,
+                )
+            except Exception:
+                self._webrtc_processor = None
+                self.webrtc_enabled = False
 
     def _audio_callback(self, indata, frames, time_info, status):
         """Callback for audio stream."""
