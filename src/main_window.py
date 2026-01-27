@@ -817,9 +817,11 @@ class MainWindow(QMainWindow):
         self.recorder = AudioRecorder(
             sample_rate=self.config.sample_rate,
             channels=self.config.channels,
-            on_level_update=self._on_audio_level,
+            on_level_update=self._on_vad_level_update,
             device=self.config.audio_device if self.config.audio_device != -1 else None,
-            mic_boost=self.config.mic_boost
+            mic_boost=self.config.mic_boost,
+            webrtc_enabled=self.config.webrtc_enabled,
+            noise_suppression_level=self.config.noise_suppression_level,
         )
         self.transcriber = Transcriber(
             backend=self.config.backend,
@@ -1134,6 +1136,38 @@ class MainWindow(QMainWindow):
             # Проверяем что окно ещё существует и не закрывается
             if not self._shutting_down and not sip.isdeleted(self):
                 self.audio_level_update.emit(min(1.0, level * 10))
+        except (RuntimeError, AttributeError):
+            pass  # Widget destroyed or shutting down
+
+    def _on_vad_level_update(self, level: float):
+        """Update VAD level bar based on audio level (speech detection).
+
+        Args:
+            level: Audio level from 0.0 (silence) to 1.0 (loud speech)
+        """
+        try:
+            # Проверяем что окно ещё существует и не закрывается
+            if not self._shutting_down and not sip.isdeleted(self):
+                # Convert level to percentage (0-100)
+                percentage = min(100, int(level * 100))
+
+                # Update the level bar
+                self.vad_level_bar.setValue(percentage)
+
+                # Change color based on speech detection
+                # Threshold: >10% considered speech (adjust based on testing)
+                if percentage > 10:
+                    # Speech detected - Blue
+                    self.vad_level_bar.setStyleSheet("""
+                        QProgressBar { border: none; background-color: #1a2840; }
+                        QProgressBar::chunk { background-color: #3b82f6; }
+                    """)
+                else:
+                    # Silence - Gray
+                    self.vad_level_bar.setStyleSheet("""
+                        QProgressBar { border: none; background-color: #1a2840; }
+                        QProgressBar::chunk { background-color: #6b7280; }
+                    """)
         except (RuntimeError, AttributeError):
             pass  # Widget destroyed or shutting down
 
