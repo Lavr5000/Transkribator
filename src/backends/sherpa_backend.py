@@ -89,6 +89,13 @@ class SherpaBackend(BaseBackend):
         # Cache for model files check result
         self._model_files_checked = None
 
+        # VAD (Voice Activity Detection)
+        self._vad = None
+        self._vad_enabled = True  # Will be set from config
+        self._vad_threshold = 0.5
+        self._min_silence_duration_ms = 800
+        self._min_speech_duration_ms = 500
+
         # Force Russian language for GigaAM models
         if self.model_size.startswith("giga-am"):
             self.language = "ru"
@@ -127,6 +134,27 @@ class SherpaBackend(BaseBackend):
         # Cache the result
         self._model_files_checked = has_transducer
         return has_transducer
+
+    def _get_vad_model_dir(self) -> Path:
+        """Get Silero VAD model directory, download if missing."""
+        from huggingface_hub import snapshot_download
+
+        vad_dir = Path(__file__).parent.parent.parent / "models" / "sherpa" / "silero-vad"
+        vad_dir.mkdir(parents=True, exist_ok=True)
+
+        # Check if model exists, download if missing
+        if not (vad_dir / "v4.onnx").exists():
+            try:
+                snapshot_download(
+                    repo_id="csukuangfj/sherpa-onnx-silero-vad",
+                    local_dir=str(vad_dir),
+                    local_dir_use_symlinks=False,
+                )
+            except Exception as e:
+                print(f"Failed to download VAD model: {e}")
+                # Return directory anyway - OfflineVad will fail gracefully
+
+        return vad_dir
 
     def load_model(self):
         """Load the Sherpa-ONNX model."""
@@ -175,6 +203,22 @@ class SherpaBackend(BaseBackend):
                 max_active_paths=4,  # Optimal balance of speed vs accuracy for Russian
                 debug=False,
             )
+
+            # Initialize Silero VAD if enabled
+            self._vad = None
+            if self._vad_enabled:
+                try:
+                    vad_dir = self._get_vad_model_dir()
+                    self._vad = sherpa_onnx.OfflineVad(
+                        model_dir=str(vad_dir),
+                        threshold=self._vad_threshold,
+                        min_silence_duration=self._min_silence_duration_ms / 1000.0,  # Convert to seconds
+                        min_speech_duration=self._min_speech_duration_ms / 1000.0,
+                    )
+                    print(f"VAD initialized: threshold={self._vad_threshold}")
+                except Exception as e:
+                    print(f"Failed to initialize VAD: {e}")
+                    self._vad = None
 
         except Exception as e:
             if self.on_progress:
@@ -230,6 +274,38 @@ class SherpaBackend(BaseBackend):
                         audio = scipy.signal.resample(audio, num_samples)
                     except ImportError:
                         pass
+
+            # Apply VAD to filter silence if enabled
+            if self._vad_enabled and self._vad is not None:
+                vad_stream = self._vad.create_stream()
+                vad_stream.accept_waveform(16000, audio)
+
+                # Flush to process remaining audio
+                self._vad.compute(vad_stream)
+
+                # Get speech segments
+                segments = vad_stream.segments
+
+                if segments:
+                    # Concatenate only speech segments (remove silence)
+                    speech_segments = []
+                    for seg in segments:
+                        start_sample = int(seg.start * 16000)
+                        end_sample = int(seg.end * 16000)
+                        # Ensure indices are within bounds
+                        start_sample = max(0, start_sample)
+                        end_sample = min(len(audio), end_sample)
+                        if end_sample > start_sample:
+                            speech_segments.append(audio[start_sample:end_sample])
+
+                    if speech_segments:
+                        audio = np.concatenate(speech_segments)
+                    else:
+                        # No speech detected
+                        return "", 0.0
+                else:
+                    # No speech segments detected
+                    return "", 0.0
 
             # Create audio stream from numpy array
             # Sherpa-ONNX expects float32 audio normalized to [-1, 1]
