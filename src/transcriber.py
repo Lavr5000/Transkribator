@@ -33,19 +33,28 @@ class Transcriber:
         compute_type: str = "auto",
         language: str = "auto",
         on_progress: Optional[Callable[[str], None]] = None,
-        enable_post_processing: bool = True
+        enable_post_processing: bool = True,
+        # VAD parameters
+        vad_enabled: bool = False,
+        vad_threshold: float = 0.5,
+        min_silence_duration_ms: int = 800,
+        min_speech_duration_ms: int = 500,
     ):
         """
         Initialize transcriber with specified backend.
 
         Args:
-            backend: Backend name (whisper, sherpa)
+            backend: Backend name (whisper, sherpa, podlodka-turbo)
             model_size: Model size/identifier
             device: Device to use (cpu, cuda, auto)
             compute_type: Computation type (float16, int8, auto)
             language: Language code (ru, en, auto)
             on_progress: Callback for progress updates
             enable_post_processing: Enable text post-processing
+            vad_enabled: Enable Voice Activity Detection
+            vad_threshold: VAD probability threshold (0.0-1.0)
+            min_silence_duration_ms: Min silence duration for VAD (ms)
+            min_speech_duration_ms: Min speech duration for VAD (ms)
         """
         self.backend_name = backend
         self.model_size = model_size
@@ -53,6 +62,12 @@ class Transcriber:
         self.compute_type = compute_type
         self.language = language if language != "auto" else None
         self.on_progress = on_progress
+
+        # VAD configuration
+        self.vad_enabled = vad_enabled
+        self.vad_threshold = vad_threshold
+        self.min_silence_duration_ms = min_silence_duration_ms
+        self.min_speech_duration_ms = min_speech_duration_ms
 
         self._backend = None
         self._lock = threading.Lock()
@@ -89,7 +104,12 @@ class Transcriber:
                 device=self.device,
                 compute_type=self.compute_type,
                 language=self.language or "auto",
-                on_progress=self.on_progress
+                on_progress=self.on_progress,
+                # VAD config
+                vad_enabled=self.vad_enabled,
+                vad_threshold=self.vad_threshold,
+                min_silence_duration_ms=self.min_silence_duration_ms,
+                min_speech_duration_ms=self.min_speech_duration_ms,
             )
 
         except Exception as e:

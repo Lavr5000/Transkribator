@@ -25,6 +25,7 @@ from .transcriber import Transcriber, get_available_backends
 from .hotkeys import HotkeyManager, type_text, safe_paste_text, paste_from_clipboard
 from .history_manager import HistoryManager
 from .mouse_handler import MouseButtonHandler
+from .remote_client import RemoteTranscriptionClient
 
 try:
     import pyperclip
@@ -171,6 +172,72 @@ class TranscriptionThread(QThread):
 
     def cancel(self):
         """Mark thread as cancelled to prevent signal emission after stop."""
+        self._is_cancelled = True
+
+
+class HybridTranscriptionThread(QThread):
+    """Thread for hybrid transcription: remote first, then local fallback."""
+    transcription_done = pyqtSignal(str, float, bool)  # text, duration, is_remote
+    transcription_error = pyqtSignal(str)
+
+    def __init__(self, remote_client, transcriber, audio, sample_rate: int):
+        super().__init__()
+        self.remote_client = remote_client
+        self.transcriber = transcriber  # For fallback
+        self.audio = audio
+        self.sample_rate = sample_rate
+        self._is_cancelled = False
+
+    def run(self):
+        try:
+            if self._is_cancelled:
+                return
+
+            start_time = time.time()
+
+            # Try remote transcription first
+            try:
+                text = self.remote_client.transcribe_remote(
+                    self.audio,
+                    self.sample_rate
+                )
+                duration = time.time() - start_time
+
+                # Check if text is empty - trigger fallback
+                if not self._is_cancelled and not text:
+                    raise Exception("Remote transcription returned empty text")
+
+                if not self._is_cancelled and text:
+                    # Remote transcription successful
+                    self.transcription_done.emit(text, duration, True)  # is_remote=True
+                    return
+
+            except Exception as remote_error:
+                # Remote transcription failed → try local fallback
+                if not self._is_cancelled:
+                    with open("debug.log", "a", encoding="utf-8") as f:
+                        f.write(f"[DEBUG] Remote transcription failed: {remote_error}\n")
+                        f.write(f"[DEBUG] Falling back to local transcription\n")
+
+                    # Fallback to local transcription
+                    text, duration = self.transcriber.transcribe(
+                        self.audio,
+                        self.sample_rate
+                    )
+
+                    if not self._is_cancelled and text:
+                        # Local transcription (fallback)
+                        self.transcription_done.emit(text, duration, False)  # is_remote=False
+                    elif not self._is_cancelled:
+                        self.transcription_error.emit("Empty result")
+
+        except Exception as e:
+            if not self._is_cancelled:
+                with open("debug.log", "a", encoding="utf-8") as f:
+                    f.write(f"[DEBUG] HybridTranscriptionThread error: {e}\n")
+                self.transcription_error.emit(str(e))
+
+    def cancel(self):
         self._is_cancelled = True
 
 
@@ -761,10 +828,18 @@ class MainWindow(QMainWindow):
             compute_type=self.config.compute_type,
             language=self.config.language,
             on_progress=self._on_progress,
-            enable_post_processing=self.config.enable_post_processing
+            enable_post_processing=self.config.enable_post_processing,
+            # VAD config
+            vad_enabled=self.config.vad_enabled,
+            vad_threshold=self.config.vad_threshold,
+            min_silence_duration_ms=self.config.min_silence_duration_ms,
+            min_speech_duration_ms=self.config.min_speech_duration_ms,
         )
         self.hotkey_manager = HotkeyManager(on_hotkey=self._on_hotkey)
         self.history_manager = HistoryManager(max_entries=50)
+
+        # Initialize remote transcription client
+        self.remote_client = RemoteTranscriptionClient()
 
         # Initialize mouse button handler
         self.mouse_handler = MouseButtonHandler(
@@ -849,6 +924,22 @@ class MainWindow(QMainWindow):
         self.timer_label.setFixedWidth(55)  # Компактный "9.9→9.9с"
         self.timer_label.move(COMPACT_WIDTH - 55 - 8, 35)  # Правый нижний угол (340-55-8=277)
         self.timer_label.hide()
+
+        # Mode indicator (local/remote transcription)
+        self.mode_label = QLabel("🏠", self.central)
+        self.mode_label.setStyleSheet(f"""
+            color: #{COLORS_HEX['accent_secondary']};
+            font-size: 18px;
+            font-weight: bold;
+            background: transparent;
+            padding: 2px;
+        """)
+        self.mode_label.setFixedWidth(30)
+        self.mode_label.setFixedHeight(30)
+        self.mode_label.setToolTip("Локальная транскрибация")
+        # Position above timer, more visible
+        self.mode_label.move(COMPACT_WIDTH - 55 - 8 - 22, 5)  # Верхний правый угол
+        self.mode_label.hide()
 
         # Center record button
         self.record_btn = RecordButton(self.central)
@@ -1054,7 +1145,7 @@ class MainWindow(QMainWindow):
     def _toggle_recording(self):
         # Защита от повторных вызовов во время обработки транскрибации
         if self._processing:
-            with open("debug.log", "a") as f:
+            with open("debug.log", "a", encoding="utf-8") as f:
                 f.write("[DEBUG] _toggle_recording BLOCKED by _processing flag\n")
             return
 
@@ -1062,12 +1153,12 @@ class MainWindow(QMainWindow):
         if not self._recording:
             current_time = time.time()
             if current_time - self._last_toggle_time < 0.3:
-                with open("debug.log", "a") as f:
+                with open("debug.log", "a", encoding="utf-8") as f:
                     f.write(f"[DEBUG] _toggle_recording START BLOCKED by debounce ({current_time - self._last_toggle_time:.3f}s)\n")
                 return
             self._last_toggle_time = current_time
 
-        with open("debug.log", "a") as f:
+        with open("debug.log", "a", encoding="utf-8") as f:
             f.write(f"[DEBUG] _toggle_recording: _recording={self._recording}, _processing={self._processing}\n")
 
         if self._recording:
@@ -1076,7 +1167,7 @@ class MainWindow(QMainWindow):
             self._start()
 
     def _start(self):
-        with open("debug.log", "a") as f:
+        with open("debug.log", "a", encoding="utf-8") as f:
             f.write(f"[DEBUG] _start() called, _recording={self._recording}, _processing={self._processing}\n")
 
         if self.recorder.start():
@@ -1095,14 +1186,14 @@ class MainWindow(QMainWindow):
             self.cancel_btn.show()
             self.close_btn.hide()
 
-            with open("debug.log", "a") as f:
+            with open("debug.log", "a", encoding="utf-8") as f:
                 f.write(f"[DEBUG] _start() SUCCESS: recording started\n")
         else:
-            with open("debug.log", "a") as f:
+            with open("debug.log", "a", encoding="utf-8") as f:
                 f.write(f"[DEBUG] _start() FAILED: recorder.start() returned False\n")
 
     def _stop(self):
-        with open("debug.log", "a") as f:
+        with open("debug.log", "a", encoding="utf-8") as f:
             f.write(f"[DEBUG] _stop() called, _recording={self._recording}, _processing={self._processing}\n")
 
         self._recording = False
@@ -1122,7 +1213,7 @@ class MainWindow(QMainWindow):
         self.cancel_btn.hide()
         self.close_btn.show()
 
-        with open("debug.log", "a") as f:
+        with open("debug.log", "a", encoding="utf-8") as f:
             f.write(f"[DEBUG] _stop(): audio is None={audio is None}, len={len(audio) if audio is not None else 0}\n")
 
         if audio is None or len(audio) == 0 or self.recorder.get_duration(audio) < 0.5:
@@ -1131,7 +1222,7 @@ class MainWindow(QMainWindow):
             if not self._hover:
                 self.status_label.hide()
             self._processing = False  # Разблокируем
-            with open("debug.log", "a") as f:
+            with open("debug.log", "a", encoding="utf-8") as f:
                 f.write(f"[DEBUG] _stop(): audio too short, _processing set to False\n")
             return
 
@@ -1142,18 +1233,24 @@ class MainWindow(QMainWindow):
         # Cleanup previous thread if exists
         self._cleanup_thread()
 
-        self._thread = TranscriptionThread(self.transcriber, audio, self.config.sample_rate)
+        # Use hybrid transcription (remote first, then local fallback)
+        self._thread = HybridTranscriptionThread(
+            self.remote_client,
+            self.transcriber,
+            audio,
+            self.config.sample_rate
+        )
         self._thread.transcription_done.connect(self._done)
         self._thread.transcription_error.connect(self._error)
         self._thread.finished.connect(self._on_thread_finished)  # QThread.finished for cleanup
         self._thread.start()
 
-        with open("debug.log", "a") as f:
+        with open("debug.log", "a", encoding="utf-8") as f:
             f.write(f"[DEBUG] _stop(): transcription thread started, _processing={self._processing}\n")
 
     def _cancel_recording(self):
         """Отменить запись без транскрибации."""
-        with open("debug.log", "a") as f:
+        with open("debug.log", "a", encoding="utf-8") as f:
             f.write(f"[DEBUG] _cancel_recording() called\n")
 
         if not self._recording:
@@ -1178,16 +1275,24 @@ class MainWindow(QMainWindow):
         self.cancel_btn.hide()
         self.close_btn.show()
 
-        with open("debug.log", "a") as f:
+        with open("debug.log", "a", encoding="utf-8") as f:
             f.write(f"[DEBUG] _cancel_recording(): recording cancelled\n")
 
     def _update_timer(self):
         elapsed = time.time() - self._rec_start
         self.timer_label.setText(f"{elapsed:.1f}с")
 
-    def _done(self, text, duration):
-        with open("debug.log", "a") as f:
-            f.write(f"[DEBUG] _done() called, setting _processing=False, text_len={len(text)}\n")
+    def _done(self, text, duration, is_remote=False):
+        """
+        Called when transcription is done.
+
+        Args:
+            text: Transcribed text
+            duration: Transcription duration in seconds
+            is_remote: True if remote transcription was used, False if local fallback
+        """
+        with open("debug.log", "a", encoding="utf-8") as f:
+            f.write(f"[DEBUG] _done() called, setting _processing=False, text_len={len(text)}, is_remote={is_remote}\n")
 
         # Check if we're shutting down
         if self._shutting_down:
@@ -1206,7 +1311,31 @@ class MainWindow(QMainWindow):
             self.status_label.hide()
         self.timer_label.setText(f"{self._rec_duration:.1f}→{transcription_time:.1f}с")
         self.timer_label.show()
-        QTimer.singleShot(2000, self._hide_timer_after_done)
+
+        # Show mode indicator (local/remote)
+        with open("debug.log", "a", encoding="utf-8") as f:
+            f.write(f"[DEBUG] Transcription time: {transcription_time:.1f}s, is_remote={is_remote}\n")
+
+        try:
+            if is_remote:  # Remote transcription successful
+                self.mode_label.setText("🌐")
+                self.mode_label.setToolTip("Удаленная транскрибация")
+                with open("debug.log", "a", encoding="utf-8") as f:
+                    f.write(f"[DEBUG] Mode: REMOTE (is_remote=True)\n")
+            else:  # Local transcription (fallback)
+                self.mode_label.setText("🏠")
+                self.mode_label.setToolTip("Локальная транскрибация")
+                with open("debug.log", "a", encoding="utf-8") as f:
+                    f.write(f"[DEBUG] Mode: LOCAL (is_remote=False, fallback)\n")
+            self.mode_label.show()
+
+            with open("debug.log", "a", encoding="utf-8") as f:
+                f.write(f"[DEBUG] Mode label shown: {self.mode_label.text()}\n")
+        except Exception as e:
+            with open("debug.log", "a", encoding="utf-8") as f:
+                f.write(f"[ERROR] Failed to show mode_label: {e}\n")
+
+        QTimer.singleShot(5000, self._hide_timer_after_done)  # Changed to 5 seconds
 
         # Убеждаемся что кнопка закрытия видна (на всякий случай)
         self.cancel_btn.hide()
@@ -1233,13 +1362,14 @@ class MainWindow(QMainWindow):
         if self.config.auto_paste:
             QTimer.singleShot(100, lambda: self._type(text))
 
-        with open("debug.log", "a") as f:
+        with open("debug.log", "a", encoding="utf-8") as f:
             f.write(f"[DEBUG] _done() finished, _processing={self._processing}\n")
 
     def _hide_timer_after_done(self):
         """Скрыть таймер после показа результата."""
         if not self._recording:
             self.timer_label.hide()
+            self.mode_label.hide()
 
     def _error(self, err):
         # Check if we're shutting down
@@ -1254,7 +1384,7 @@ class MainWindow(QMainWindow):
         self.cancel_btn.hide()
         self.close_btn.show()
 
-        with open("debug.log", "a") as f:
+        with open("debug.log", "a", encoding="utf-8") as f:
             f.write(f"[DEBUG] _error() called: {err}\n")
 
     def _type(self, text):

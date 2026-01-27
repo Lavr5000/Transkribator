@@ -65,6 +65,11 @@ class SherpaBackend(BaseBackend):
         on_progress: Optional[Callable[[str], None]] = None,
         model_path: Optional[str] = None,
         num_threads: Optional[int] = None,
+        # VAD parameters
+        vad_enabled: bool = False,
+        vad_threshold: float = 0.5,
+        min_silence_duration_ms: int = 800,
+        min_speech_duration_ms: int = 500,
     ):
         """
         Initialize Sherpa-ONNX backend.
@@ -77,6 +82,10 @@ class SherpaBackend(BaseBackend):
             on_progress: Callback for progress updates
             model_path: Optional path to model directory (if not default)
             num_threads: Number of threads for ONNX runtime (default: cpu_count)
+            vad_enabled: Enable Voice Activity Detection
+            vad_threshold: VAD probability threshold (0.0-1.0)
+            min_silence_duration_ms: Min silence duration for VAD (ms)
+            min_speech_duration_ms: Min speech duration for VAD (ms)
         """
         super().__init__(model_size, device, compute_type, language, on_progress)
         self.model_path = model_path
@@ -89,12 +98,12 @@ class SherpaBackend(BaseBackend):
         # Cache for model files check result
         self._model_files_checked = None
 
-        # VAD (Voice Activity Detection)
+        # VAD (Voice Activity Detection) - set from parameters
         self._vad = None
-        self._vad_enabled = True  # Will be set from config
-        self._vad_threshold = 0.5
-        self._min_silence_duration_ms = 800
-        self._min_speech_duration_ms = 500
+        self._vad_enabled = vad_enabled
+        self._vad_threshold = vad_threshold
+        self._min_silence_duration_ms = min_silence_duration_ms
+        self._min_speech_duration_ms = min_speech_duration_ms
 
         # Force Russian language for GigaAM models
         if self.model_size.startswith("giga-am"):
