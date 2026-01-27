@@ -1218,6 +1218,13 @@ class MainWindow(QMainWindow):
         with open("debug.log", "a", encoding="utf-8") as f:
             f.write(f"[DEBUG] _start() called, _recording={self._recording}, _processing={self._processing}\n")
 
+        # Reset VAD level bar to silence state
+        self.vad_level_bar.setValue(0)
+        self.vad_level_bar.setStyleSheet("""
+            QProgressBar { border: none; background-color: #1a2840; }
+            QProgressBar::chunk { background-color: #6b7280; }
+        """)
+
         if self.recorder.start():
             self._recording = True
             self._rec_start = time.time()
@@ -1301,6 +1308,13 @@ class MainWindow(QMainWindow):
         with open("debug.log", "a", encoding="utf-8") as f:
             f.write(f"[DEBUG] _cancel_recording() called\n")
 
+        # Reset VAD level bar to silence state
+        self.vad_level_bar.setValue(0)
+        self.vad_level_bar.setStyleSheet("""
+            QProgressBar { border: none; background-color: #1a2840; }
+            QProgressBar::chunk { background-color: #6b7280; }
+        """)
+
         if not self._recording:
             return
 
@@ -1341,6 +1355,13 @@ class MainWindow(QMainWindow):
         """
         with open("debug.log", "a", encoding="utf-8") as f:
             f.write(f"[DEBUG] _done() called, setting _processing=False, text_len={len(text)}, is_remote={is_remote}\n")
+
+        # Reset VAD level bar to silence state
+        self.vad_level_bar.setValue(0)
+        self.vad_level_bar.setStyleSheet("""
+            QProgressBar { border: none; background-color: #1a2840; }
+            QProgressBar::chunk { background-color: #6b7280; }
+        """)
 
         # Check if we're shutting down
         if self._shutting_down:
