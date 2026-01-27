@@ -5,35 +5,35 @@
 See: .planning/PROJECT.md (updated 2026-01-27)
 
 **Core value:** Точность распознавания русской речи на уровне WhisperTyping без существенной потери скорости
-**Current focus:** Phase 1: Critical Bug Fixes
+**Current focus:** Phase 2: Noise Reduction + VAD
 
 ## Current Position
 
-Phase: 1 of 4 (Critical Bug Fixes)
-Plan: 5 of 5 in current phase
-Status: Phase complete
-Last activity: 2026-01-27 — Completed 01-05: Phase 1 verification
+Phase: 2 of 4 (Noise Reduction + VAD)
+Plan: 1 of 5 in current phase
+Status: In progress
+Last activity: 2026-01-27 — Completed 02-01: WebRTC Noise Suppression
 
-Progress: [████████████] 100%
+Progress: [███░░░░░░░░░░░░░░░░░░░░░░░░░░] 20%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 5
-- Average duration: 4.2 min
-- Total execution time: 0.35 hours
+- Total plans completed: 6
+- Average duration: 4.0 min
+- Total execution time: 0.40 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1 | 5/5 | 21 min | 4.2 min |
-| 2 | 0/5 | - | - |
+| 2 | 1/5 | 3 min | 3.0 min |
 | 3 | 0/6 | - | - |
 | 4 | 0/5 | - | - |
 
 **Recent Trend:**
-- Last 5 plans: 5 min, 5 min, 1 min, 8 min (testing), 3 min (verification)
+- Last 5 plans: 5 min, 1 min, 8 min (testing), 3 min (verification), 3 min (WebRTC NS)
 - Trend: Stable (fast execution)
 
 *Updated after each plan completion*
@@ -65,6 +65,9 @@ Recent decisions affecting current work:
 - [01-05]: Sherpa backend confirmed: Transducer mode (line 168), max_active_paths=4 (line 175)
 - [01-05]: Client-server synchronization confirmed: src/ and RemotePackage/ identical (diff empty)
 - [01-05]: Expected impact documented: 15-30% accuracy improvement, primary gain from Sherpa Transducer fix (+20-30%)
+- [02-01]: WebRTC noise suppression integrated with 10ms chunk processing (160 samples @ 16kHz)
+- [02-01]: Noise suppression level 2 (moderate) chosen as default - balances quality vs overhead
+- [02-01]: Fallback pattern established for optional platform dependencies (try/except on import)
 
 ### Pending Todos
 
@@ -87,11 +90,10 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-01-27 12:31 UTC
-Stopped at: Completed 01-05 (Phase 1 verification) - PHASE 1 COMPLETE
+Last session: 2026-01-27 18:26 UTC
+Stopped at: Completed 02-01 (WebRTC Noise Suppression)
 Resume file: None
 
 ---
 
-**Next Step:** Begin Phase 2 (Enhanced Post-Processing) - implement punctuation and capitalization for Russian text
-**Or:** Run A/B test to validate Phase 1 improvements: `python tests/test_backend_quality.py`
+**Next Step:** Phase 02-02: AGC Tuning - optimize auto_gain_dbfs for optimal audio levels
