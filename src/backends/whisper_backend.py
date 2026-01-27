@@ -162,9 +162,13 @@ class WhisperBackend(BaseBackend):
                 segments, info = self._model.transcribe(
                     audio,
                     language=language,
-                    beam_size=1,  # Faster than 5, minimal quality loss
+                    beam_size=5,  # Quality mode - optimal for Russian accuracy
+                    temperature=0.0,  # Deterministic decoding, no hallucinations
                     vad_filter=True,
-                    vad_parameters=dict(min_silence_duration_ms=200)  # Faster silence detection
+                    vad_parameters=dict(
+                        min_silence_duration_ms=300,  # Optimized for Russian speech patterns
+                        speech_pad_ms=400,  # Prevents cutting off word endings
+                    )
                 )
                 text = " ".join([segment.text for segment in segments]).strip()
 
@@ -173,6 +177,7 @@ class WhisperBackend(BaseBackend):
                 result = self._model.transcribe(
                     audio,
                     language=language,
+                    temperature=0.0,  # Add deterministic decoding
                     fp16=False
                 )
                 text = result["text"].strip()
