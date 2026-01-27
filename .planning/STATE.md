@@ -10,30 +10,30 @@ See: .planning/PROJECT.md (updated 2026-01-27)
 ## Current Position
 
 Phase: 2 of 4 (Noise Reduction + VAD)
-Plan: 1 of 5 in current phase
+Plan: 3 of 5 in current phase
 Status: In progress
-Last activity: 2026-01-27 — Completed 02-01: WebRTC Noise Suppression
+Last activity: 2026-01-27 — Completed 02-03: Silero VAD Integration
 
-Progress: [███░░░░░░░░░░░░░░░░░░░░░░░░░░] 20%
+Progress: [██████░░░░░░░░░░░░░░░░░░░░░░] 60%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 6
+- Total plans completed: 8
 - Average duration: 4.0 min
-- Total execution time: 0.40 hours
+- Total execution time: 0.53 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1 | 5/5 | 21 min | 4.2 min |
-| 2 | 1/5 | 3 min | 3.0 min |
+| 2 | 3/5 | 11 min | 3.7 min |
 | 3 | 0/6 | - | - |
 | 4 | 0/5 | - | - |
 
 **Recent Trend:**
-- Last 5 plans: 5 min, 1 min, 8 min (testing), 3 min (verification), 3 min (WebRTC NS)
+- Last 5 plans: 3 min (WebRTC NS), 4 min (AGC), 4 min (VAD), 3 min, 5 min
 - Trend: Stable (fast execution)
 
 *Updated after each plan completion*
@@ -68,6 +68,13 @@ Recent decisions affecting current work:
 - [02-01]: WebRTC noise suppression integrated with 10ms chunk processing (160 samples @ 16kHz)
 - [02-01]: Noise suppression level 2 (moderate) chosen as default - balances quality vs overhead
 - [02-01]: Fallback pattern established for optional platform dependencies (try/except on import)
+- [02-02]: AGC target level set to -3 dBFS for optimal headroom without clipping
+- [02-02]: Initial gain adjustment set to 10 dB for quiet microphone boost
+- [02-02]: AGC uses RMS-based level detection with 100ms attack time
+- [02-03]: Silero VAD integrated via sherpa_onnx.OfflineVad for speech detection
+- [02-03]: VAD threshold=0.5, min_silence=800ms, min_speech=500ms for Russian speech patterns
+- [02-03]: VAD model auto-downloads from HuggingFace (csukuangfj/sherpa-onnx-silero-vad)
+- [02-03]: Graceful fallback if VAD fails - transcription continues without VAD
 
 ### Pending Todos
 
@@ -90,10 +97,10 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-01-27 18:26 UTC
-Stopped at: Completed 02-01 (WebRTC Noise Suppression)
+Last session: 2026-01-27 18:28 UTC
+Stopped at: Completed 02-03 (Silero VAD Integration)
 Resume file: None
 
 ---
 
-**Next Step:** Phase 02-02: AGC Tuning - optimize auto_gain_dbfs for optimal audio levels
+**Next Step:** Phase 02-04: VAD for Whisper backend - apply same VAD pattern to WhisperBackend
