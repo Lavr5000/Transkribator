@@ -33,22 +33,24 @@ class SherpaBackend(BaseBackend):
     # Default model configurations
     MODELS = {
         "giga-am-v2-ru": {
-            "name": "GigaAM v2 Russian (2025-04-19)",
-            "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-ctc-giga-am-v2-russian-2025-04-19",
+            "name": "GigaAM v2 Russian Transducer (2025-04-19)",
+            "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-transducer-giga-am-v2-russian-2025-04-19",
             "files": [
-                "model.onnx",
-                "tokens.txt",
-                "config.json"
+                "encoder.int8.onnx",
+                "decoder.onnx",
+                "joiner.onnx",
+                "tokens.txt"
             ],
             "language": "ru",
         },
         "giga-am-ru": {
-            "name": "GigaAM Russian (2024-10-24)",
-            "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-ctc-giga-am-russian-2024-10-24",
+            "name": "GigaAM Russian Transducer (2024-10-24)",
+            "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-transducer-giga-am-russian-2024-10-24",
             "files": [
-                "model.onnx",
-                "tokens.txt",
-                "config.json"
+                "encoder.int8.onnx",
+                "decoder.onnx",
+                "joiner.onnx",
+                "tokens.txt"
             ],
             "language": "ru",
         },
@@ -117,12 +119,14 @@ class SherpaBackend(BaseBackend):
             self._model_files_checked = False
             return False
 
-        # Check for model.onnx or model.int8.onnx (both are valid)
-        has_model = (model_dir / "model.onnx").exists() or (model_dir / "model.int8.onnx").exists()
+        # Check for encoder/decoder/joiner files (Transducer mode)
+        has_transducer = (
+            (model_dir / "encoder.int8.onnx").exists() or (model_dir / "encoder.onnx").exists()
+        ) and (model_dir / "decoder.onnx").exists() and (model_dir / "joiner.onnx").exists()
 
         # Cache the result
-        self._model_files_checked = has_model
-        return has_model
+        self._model_files_checked = has_transducer
+        return has_transducer
 
     def load_model(self):
         """Load the Sherpa-ONNX model."""
@@ -151,21 +155,24 @@ class SherpaBackend(BaseBackend):
                     f"See: {self.MODELS.get(self.model_size, {}).get('url', '')}"
                 )
 
-            # Detect model file (model.onnx or model.int8.onnx)
-            model_file = model_dir / "model.onnx"
-            if not model_file.exists():
-                model_file = model_dir / "model.int8.onnx"
+            # Detect model files for Transducer mode
+            encoder_file = model_dir / "encoder.int8.onnx"
+            if not encoder_file.exists():
+                encoder_file = model_dir / "encoder.onnx"
 
+            decoder_file = model_dir / "decoder.onnx"
+            joiner_file = model_dir / "joiner.onnx"
             tokens_file = model_dir / "tokens.txt"
 
-            # Create recognizer using factory method for NeMo CTC models
-            self._recognizer = sherpa_onnx.OfflineRecognizer.from_nemo_ctc(
-                model=str(model_file),
+            # Create recognizer using Transducer mode (GigaAM v2 is Transducer, NOT CTC!)
+            self._recognizer = sherpa_onnx.OfflineRecognizer.from_nemo_transducer(
+                encoder=str(encoder_file),
+                decoder=str(decoder_file),
+                joiner=str(joiner_file),
                 tokens=str(tokens_file),
                 num_threads=self.num_threads,
                 sample_rate=16000,
-                feature_dim=80,
-                decoding_method="greedy_search",
+                max_active_paths=4,  # Optimal balance of speed vs accuracy for Russian
                 debug=False,
             )
 
