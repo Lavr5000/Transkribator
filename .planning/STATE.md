@@ -12,28 +12,28 @@ See: .planning/PROJECT.md (updated 2026-01-27)
 Phase: 2 of 4 (Noise Reduction + VAD)
 Plan: 4 of 5 in current phase
 Status: In progress
-Last activity: 2026-01-27 — Completed 02-02: WebRTC AGC Migration
+Last activity: 2026-01-27 — Completed 02-04: VAD for All Backends
 
-Progress: [███████░░░░░░░░░░░░░░░░░░░░] 80%
+Progress: [████████░░░░░░░░░░░░░░░░░░] 80%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 8
-- Average duration: 4.0 min
-- Total execution time: 0.53 hours
+- Total plans completed: 9
+- Average duration: 4.3 min
+- Total execution time: 0.65 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1 | 5/5 | 21 min | 4.2 min |
-| 2 | 3/5 | 11 min | 3.7 min |
+| 2 | 4/5 | 19 min | 4.8 min |
 | 3 | 0/6 | - | - |
 | 4 | 0/5 | - | - |
 
 **Recent Trend:**
-- Last 5 plans: 3 min (WebRTC NS), 4 min (AGC), 4 min (VAD), 3 min, 5 min
+- Last 5 plans: 4 min (AGC), 5 min (VAD Sherpa), 8 min (VAD All), 3 min, 5 min
 - Trend: Stable (fast execution)
 
 *Updated after each plan completion*
@@ -77,6 +77,10 @@ Recent decisions affecting current work:
 - [02-03]: VAD threshold=0.5, min_silence=800ms, min_speech=500ms for Russian speech patterns
 - [02-03]: VAD model auto-downloads from HuggingFace (csukuangfj/sherpa-onnx-silero-vad)
 - [02-03]: Graceful fallback if VAD fails - transcription continues without VAD
+- [02-04]: VAD extended to WhisperBackend and PodlodkaBackend with unified config
+- [02-04]: All backends now accept VAD parameters via __init__ (vad_enabled, vad_threshold, etc.)
+- [02-04]: Transcriber passes VAD config from config.py to all backends
+- [02-04]: Shared VAD model directory: models/sherpa/silero-vad
 
 ### Pending Todos
 
@@ -90,8 +94,6 @@ None yet.
 - 📊 Expected: 15-30% accuracy improvement based on research (Sherpa Transducer fix is primary driver)
 
 **Phase 2 Concerns:**
-
-**Phase 2 Concerns:**
 - Punctuation model accuracy for Russian — deepmultilingualpunctuation not trained on Russian, may need to fallback to rule-based
 
 **Phase 3 Concerns:**
@@ -99,10 +101,10 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-01-27 18:32 UTC
-Stopped at: Completed 02-02 (WebRTC AGC Migration)
+Last session: 2026-01-27 18:53 UTC
+Stopped at: Completed 02-04 (VAD for All Backends)
 Resume file: None
 
 ---
 
-**Next Step:** Phase 02-04: VAD for Whisper backend - apply same VAD pattern to WhisperBackend
+**Next Step:** Phase 02-05: VAD UI Controls - add settings panel for VAD configuration
