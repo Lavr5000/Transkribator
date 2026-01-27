@@ -90,15 +90,15 @@ Plans:
 6. Punctuation restoration работает для всех бэкендов
 7. Пост-обработка адаптивна для Whisper (есть пунктуация) vs Sherpa (нет пунктуации)
 
-**Plans**: TBD (will be determined during planning)
+**Plans**: 6 plans in 3 waves
 
 Plans:
-- [ ] 03-01: Expand EnhancedTextProcessor from 50 to 100+ correction rules
-- [ ] 03-02: Add phonetic corrections for Russian language
-- [ ] 03-03: Add morphological corrections (gender, case, conjugation)
-- [ ] 03-04: Create proper noun dictionary (1000-5000 entries)
-- [ ] 03-05: Improve capitalization after punctuation
-- [ ] 03-06: Implement adaptive post-processing for Whisper vs Sherpa
+- [ ] 03-01 — Expand EnhancedTextProcessor from 50 to 100+ correction rules
+- [ ] 03-02 — Add phonetic corrections for Russian language (б↔п, в↔ф, г↔к, д↔т, ж↔ш, з↔с)
+- [ ] 03-03 — Add morphological corrections using pymorphy2 (gender, case)
+- [ ] 03-04 — Create proper noun dictionary (500-1000 entries: cities, names, countries)
+- [ ] 03-05 — Improve capitalization after punctuation
+- [ ] 03-06 — Implement adaptive post-processing for Whisper vs Sherpa
 
 ### Phase 4: Advanced Features
 
