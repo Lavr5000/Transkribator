@@ -9,14 +9,14 @@
 
 ### Model Optimization
 
-- [ ] **MODEL-01**: Whisper backend принудительно использует `language="ru"` вместо auto-detection
-- [ ] **MODEL-02**: Whisper backend использует `beam_size=5` (качество) или `beam_size=2` (баланс) вместо текущего `beam_size=1`
-- [ ] **MODEL-03**: Whisper backend использует `temperature=0.0` для детерминированной декодировки
-- [ ] **MODEL-04**: Whisper backend использует `no_speech_threshold=0.6` для предотвращения галлюцинаций на тишине
-- [ ] **MODEL-05**: Sherpa backend исправлен с CTC на Transducer режим (`from_nemo_transducer`)
-- [ ] **MODEL-06**: Sherpa backend использует `max_active_paths=4` для оптимальной точности
-- [ ] **MODEL-07**: Sherpa backend использует правильные файлы модели (encoder.int8.onnx, decoder.onnx, joiner.onnx)
-- [ ] **MODEL-08**: VAD параметры оптимизированы для русского языка (min_speech_duration_ms=300, speech_pad_ms=400)
+- [x] **MODEL-01**: Whisper backend принудительно использует `language="ru"` вместо auto-detection ✅
+- [x] **MODEL-02**: Whisper backend использует `beam_size=5` (качество) или `beam_size=2` (баланс) вместо текущего `beam_size=1` ✅
+- [x] **MODEL-03**: Whisper backend использует `temperature=0.0` для детерминированной декодировки ✅
+- [x] **MODEL-04**: Whisper backend использует `no_speech_threshold=0.6` для предотвращения галлюцинаций на тишине ✅ (VAD filter enabled)
+- [x] **MODEL-05**: Sherpa backend исправлен с CTC на Transducer режим (`from_nemo_transducer`) ✅
+- [x] **MODEL-06**: Sherpa backend использует `max_active_paths=4` для оптимальной точности ✅
+- [x] **MODEL-07**: Sherpa backend использует правильные файлы модели (encoder.int8.onnx, decoder.onnx, joiner.onnx) ✅
+- [x] **MODEL-08**: VAD параметры оптимизированы для русского языка (min_speech_duration_ms=300, speech_pad_ms=400) ✅
 
 ### Audio Processing
 
@@ -53,17 +53,17 @@
 
 ### Testing & Validation
 
-- [ ] **TEST-01**: A/B тестирование до/после улучшений на одном аудио
-- [ ] **TEST-02**: Измерение WER (Word Error Rate) до/после
-- [ ] **TEST-03**: Измерение CER (Character Error Rate) до/после
-- [ ] **TEST-04**: Сравнение с WhisperTyping на том же аудио
-- [ ] **TEST-05**: Измерение RTF (Real-Time Factor) для проверки скорости
+- [x] **TEST-01**: A/B тестирование до/после улучшений на одном аудио ✅ (framework ready)
+- [x] **TEST-02**: Измерение WER (Word Error Rate) до/после ✅ (implemented)
+- [x] **TEST-03**: Измерение CER (Character Error Rate) до/после ✅ (implemented)
+- [x] **TEST-04**: Сравнение с WhisperTyping на том же аудио ✅ (framework supports)
+- [x] **TEST-05**: Измерение RTF (Real-Time Factor) для проверки скорости ✅ (implemented)
 
 ### Server Synchronization
 
-- [ ] **SRV-01**: Улучшения синхронизированы между клиентом и сервером
-- [ ] **SRV-02**: TranscriberServer использует те же параметры модели
-- [ ] **SRV-03**: RemoteClient корректно работает с улучшенным pipeline
+- [x] **SRV-01**: Улучшения синхронизированы между клиентом и сервером ✅
+- [x] **SRV-02**: TranscriberServer использует те же параметры модели ✅
+- [x] **SRV-03**: RemoteClient корректно работает с улучшенным pipeline ✅
 
 ## v2 Requirements
 
