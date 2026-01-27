@@ -57,7 +57,7 @@
 - [ ] **TEST-02**: Измерение WER (Word Error Rate) до/после
 - [ ] **TEST-03**: Измерение CER (Character Error Rate) до/после
 - [ ] **TEST-04**: Сравнение с WhisperTyping на том же аудио
-- [ ] **TEST-05': Измерение RTF (Real-Time Factor) для проверки скорости
+- [ ] **TEST-05**: Измерение RTF (Real-Time Factor) для проверки скорости
 
 ### Server Synchronization
 
@@ -140,4 +140,4 @@
 
 ---
 *Requirements defined: 2026-01-27*
-*Last updated: 2026-01-27 after initial definition*
+*Last updated: 2026-01-27 after roadmap creation*
