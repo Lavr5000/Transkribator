@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QTextEdit, QComboBox,
     QCheckBox, QGroupBox, QTabWidget,
     QSystemTrayIcon, QMenu, QMessageBox,
-    QApplication, QDialog, QScrollArea
+    QApplication, QDialog, QScrollArea, QProgressBar
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread, QPoint, QRectF, QSize
 from PyQt6.QtGui import (
@@ -945,6 +945,20 @@ class MainWindow(QMainWindow):
         self.record_btn = RecordButton(self.central)
         self.record_btn.move((COMPACT_WIDTH - 36) // 2, (COMPACT_HEIGHT - 36) // 2)
         self.record_btn.clicked.connect(self._toggle_recording)
+
+        # VAD level bar for speech detection visualization
+        self.vad_level_bar = QProgressBar(self.central)
+        self.vad_level_bar.setRange(0, 100)  # 0-100%
+        self.vad_level_bar.setTextVisible(False)
+        self.vad_level_bar.setFixedHeight(4)  # Thin bar
+        self.vad_level_bar.setFixedWidth(200)
+        self.vad_level_bar.move((COMPACT_WIDTH - 200) // 2, (COMPACT_HEIGHT - 36) // 2 + 40)  # Below record button
+
+        # Initial style: Gray (silence)
+        self.vad_level_bar.setStyleSheet("""
+            QProgressBar { border: none; background-color: #1a2840; }
+            QProgressBar::chunk { background-color: #6b7280; }
+        """)
 
         # Corner buttons (top-right, small)
         btn_y = 6
