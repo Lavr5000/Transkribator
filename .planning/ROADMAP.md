@@ -35,7 +35,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 5. Клиент и сервер используют идентичные параметры моделей (синхронизированы)
 6. A/B тесты показывают измеримое улучшение WER/CER по сравнению с текущей версией
 
-**Plans**: TBD (will be determined during planning)
+**Plans**: 5 plans in 2 waves
 
 Plans:
 - [x] 01-01 — Fix Whisper backend parameters (language="ru", beam_size=5, temperature=0.0, VAD optimization) ✅
@@ -62,14 +62,14 @@ Plans:
 5. VAD параметры настраиваются через config (threshold, min_silence_duration_ms)
 6. VAD визуализируется в UI (индикатор записи речи)
 
-**Plans**: TBD (will be determined during planning)
+**Plans**: 5 plans in 3 waves
 
 Plans:
-- [ ] 02-01: Integrate WebRTC Noise/Gain into AudioRecorder
-- [ ] 02-02: Replace 20x software gain with adaptive AGC
-- [ ] 02-03: Integrate Silero VAD into SherpaBackend
-- [ ] 02-04: Implement VAD for all backends (Whisper, Sherpa, Podlodka)
-- [ ] 02-05: Add VAD visualization in UI
+- [ ] 02-01 — Integrate WebRTC Noise/Gain into AudioRecorder
+- [ ] 02-02 — Replace 20x software gain with adaptive AGC
+- [ ] 02-03 — Integrate Silero VAD into SherpaBackend
+- [ ] 02-04 — Implement VAD for all backends (Whisper, Sherpa, Podlodka)
+- [ ] 02-05 — Add VAD visualization in UI
 
 ### Phase 3: Text Processing Enhancement
 
@@ -130,7 +130,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Critical Bug Fixes | 5/5 | ✅ Complete | 2026-01-27 |
-| 2. Noise Reduction + VAD | 0/5 | Not started | - |
+| 2. Noise Reduction + VAD | 0/5 | Planned | - |
 | 3. Text Processing Enhancement | 0/6 | Not started | - |
 | 4. Advanced Features | 0/5 | Not started | - |
 
