@@ -18,11 +18,20 @@ except ImportError:
     PhoneticCorrector = None
     print("[WARNING] phonetics module not available")
 
+# Import morphological corrections
+try:
+    from .morphology import MorphologyCorrector
+    MORPHOLOGY_AVAILABLE = True
+except ImportError:
+    MORPHOLOGY_AVAILABLE = False
+    MorphologyCorrector = None
+    print("[WARNING] morphology module not available")
+
 
 class EnhancedTextProcessor:
     """Enhanced text processor with punctuation restoration and Sherpa-specific corrections."""
 
-    def __init__(self, language: str = "ru", enable_corrections: bool = True, enable_punctuation: bool = True, enable_phonetics: bool = True):
+    def __init__(self, language: str = "ru", enable_corrections: bool = True, enable_punctuation: bool = True, enable_phonetics: bool = True, enable_morphology: bool = True):
         """
         Initialize enhanced text processor.
 
@@ -31,11 +40,13 @@ class EnhancedTextProcessor:
             enable_corrections: Whether to enable error corrections
             enable_punctuation: Whether to restore punctuation
             enable_phonetics: Whether to enable phonetic corrections (voiced/unvoiced)
+            enable_morphology: Whether to enable morphological corrections (gender, case)
         """
         self.language = language
         self.enable_corrections = enable_corrections
         self.enable_punctuation = enable_punctuation
         self.enable_phonetics = enable_phonetics and PHONETICS_AVAILABLE
+        self.enable_morphology = enable_morphology and MORPHOLOGY_AVAILABLE
 
         self._load_corrections()
 
@@ -50,6 +61,12 @@ class EnhancedTextProcessor:
             self.phonetic_corrector = PhoneticCorrector(enable_validation=True)
         else:
             self.phonetic_corrector = None
+
+        # Initialize morphological corrector
+        if self.enable_morphology:
+            self.morphology_corrector = MorphologyCorrector()
+        else:
+            self.morphology_corrector = None
 
     def _load_corrections(self):
         """Load error correction rules for the target language."""
@@ -452,17 +469,21 @@ class EnhancedTextProcessor:
         if self.enable_phonetics and self.phonetic_corrector:
             text = self.phonetic_corrector.process(text)
 
-        # Step 3: Add punctuation (for CTC models like Sherpa)
+        # Step 3: Morphological corrections (gender agreement, case endings)
+        if self.enable_morphology and self.morphology_corrector:
+            text = self._fix_morphology(text)
+
+        # Step 4: Add punctuation (for CTC models like Sherpa)
         if self.enable_punctuation and self.punctuation_model:
             text = self._add_punctuation(text)
 
-        # Step 4: Fix punctuation placement
+        # Step 5: Fix punctuation placement
         text = self._fix_punctuation(text)
 
-        # Step 5: Fix capitalization
+        # Step 6: Fix capitalization
         text = self._fix_capitalization(text)
 
-        # Step 6: Final cleanup
+        # Step 7: Final cleanup
         text = self._cleanup(text)
 
         return text
@@ -475,6 +496,29 @@ class EnhancedTextProcessor:
         # Apply pre-compiled corrections (already sorted by length)
         for pattern, correct in self._compiled_patterns:
             text = pattern.sub(correct, text)
+
+        return text
+
+    def _fix_morphology(self, text: str) -> str:
+        """Apply morphological corrections using pymorphy2.
+
+        Fixes gender agreement between adjectives and nouns, and
+        corrects basic case ending errors.
+
+        Args:
+            text: Text to correct
+
+        Returns:
+            Text with morphological corrections applied
+        """
+        if not self.enable_morphology or not self.morphology_corrector:
+            return text
+
+        # Apply gender agreement corrections
+        text = self.morphology_corrector.fix_gender_agreement(text)
+
+        # Apply case ending corrections
+        text = self.morphology_corrector.fix_case_endings(text)
 
         return text
 
