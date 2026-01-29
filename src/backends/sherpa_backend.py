@@ -10,10 +10,10 @@ from .base import BaseBackend
 
 # Import enhanced text processor for better punctuation
 try:
-    from ..text_processor_enhanced import EnhancedTextProcessor
+    from src.text_processor_enhanced import EnhancedTextProcessor
     ENHANCED_PROCESSOR_AVAILABLE = True
 except ImportError:
-    from ..text_processor import AdvancedTextProcessor
+    from src.text_processor import AdvancedTextProcessor
     ENHANCED_PROCESSOR_AVAILABLE = False
 
 try:
@@ -144,14 +144,17 @@ class SherpaBackend(BaseBackend):
             self._model_files_checked = False
             return False
 
+        # Check for CTC model file (model.int8.onnx)
+        has_ctc = (model_dir / "model.int8.onnx").exists() or (model_dir / "model.onnx").exists()
+
         # Check for encoder/decoder/joiner files (Transducer mode)
         has_transducer = (
             (model_dir / "encoder.int8.onnx").exists() or (model_dir / "encoder.onnx").exists()
         ) and (model_dir / "decoder.onnx").exists() and (model_dir / "joiner.onnx").exists()
 
-        # Cache the result
-        self._model_files_checked = has_transducer
-        return has_transducer
+        # Cache the result - either CTC or Transducer is OK
+        self._model_files_checked = has_ctc or has_transducer
+        return has_ctc or has_transducer
 
     def _get_vad_model_dir(self) -> Path:
         """Get Silero VAD model directory, download if missing."""
@@ -201,26 +204,38 @@ class SherpaBackend(BaseBackend):
                     f"See: {self.MODELS.get(self.model_size, {}).get('url', '')}"
                 )
 
-            # Detect model files for Transducer mode
-            encoder_file = model_dir / "encoder.int8.onnx"
-            if not encoder_file.exists():
-                encoder_file = model_dir / "encoder.onnx"
-
-            decoder_file = model_dir / "decoder.onnx"
-            joiner_file = model_dir / "joiner.onnx"
+            # Detect model type - CTC vs Transducer
+            model_file = model_dir / "model.int8.onnx"
             tokens_file = model_dir / "tokens.txt"
 
-            # Create recognizer using Transducer mode (GigaAM v2 is Transducer, NOT CTC!)
-            self._recognizer = sherpa_onnx.OfflineRecognizer.from_nemo_transducer(
-                encoder=str(encoder_file),
-                decoder=str(decoder_file),
-                joiner=str(joiner_file),
-                tokens=str(tokens_file),
-                num_threads=self.num_threads,
-                sample_rate=16000,
-                max_active_paths=4,  # Optimal balance of speed vs accuracy for Russian
-                debug=False,
-            )
+            if model_file.exists():
+                # CTC model (GigaAM v2 CTC)
+                self._recognizer = sherpa_onnx.OfflineRecognizer.from_nemo_ctc(
+                    model=str(model_file),
+                    tokens=str(tokens_file),
+                    num_threads=self.num_threads,
+                    sample_rate=16000,
+                    debug=False,
+                )
+            else:
+                # Transducer model (encoder/decoder/joiner)
+                encoder_file = model_dir / "encoder.int8.onnx"
+                if not encoder_file.exists():
+                    encoder_file = model_dir / "encoder.onnx"
+
+                decoder_file = model_dir / "decoder.onnx"
+                joiner_file = model_dir / "joiner.onnx"
+
+                self._recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
+                    encoder=str(encoder_file),
+                    decoder=str(decoder_file),
+                    joiner=str(joiner_file),
+                    tokens=str(tokens_file),
+                    num_threads=self.num_threads,
+                    sample_rate=16000,
+                    model_type="transducer",
+                    debug=False,
+                )
 
             # Initialize Silero VAD if enabled
             self._vad = None

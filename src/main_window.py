@@ -1,15 +1,18 @@
 """Main window for ГолосТекст application - Compact WhisperTyping style."""
 import sys
 import time
+import json
 import threading
 from typing import Optional, List
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QTextEdit, QComboBox,
-    QCheckBox, QGroupBox, QTabWidget,
+    QCheckBox, QGroupBox, QTabWidget, QButtonGroup,
     QSystemTrayIcon, QMenu, QMessageBox,
-    QApplication, QDialog, QScrollArea, QProgressBar
+    QApplication, QDialog, QScrollArea, QProgressBar,
+    QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog, QLineEdit, QAbstractItemView,
+    QSlider
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread, QPoint, QRectF, QSize
 from PyQt6.QtGui import (
@@ -19,13 +22,13 @@ from PyQt6.QtGui import (
 )
 from PyQt6 import sip
 
-from .config import Config, WHISPER_MODELS, SHERPA_MODELS, PODLODKA_MODELS, LANGUAGES, BACKENDS, MOUSE_BUTTONS, PASTE_METHODS
-from .audio_recorder import AudioRecorder
-from .transcriber import Transcriber, get_available_backends
-from .hotkeys import HotkeyManager, type_text, safe_paste_text, paste_from_clipboard
-from .history_manager import HistoryManager
-from .mouse_handler import MouseButtonHandler
-from .remote_client import RemoteTranscriptionClient
+from config import Config, WHISPER_MODELS, SHERPA_MODELS, PODLODKA_MODELS, LANGUAGES, BACKENDS, MOUSE_BUTTONS, PASTE_METHODS, QUALITY_PROFILES, MODEL_METADATA
+from audio_recorder import AudioRecorder
+from transcriber import Transcriber, get_available_backends
+from hotkeys import HotkeyManager, type_text, safe_paste_text, paste_from_clipboard
+from history_manager import HistoryManager
+from mouse_handler import MouseButtonHandler
+from remote_client import RemoteTranscriptionClient
 
 try:
     import pyperclip
@@ -476,6 +479,77 @@ class ClickableLabel(QLabel):
         super().leaveEvent(event)
 
 
+class DictionaryEntryDialog(QDialog):
+    """Dialog for adding/editing dictionary entries."""
+
+    def __init__(self, parent=None, wrong: str = "", correct: str = "", case_sensitive: bool = False):
+        super().__init__(parent)
+        self.setWindowTitle("Запись словаря")
+        self.setMinimumWidth(400)
+        self.setStyleSheet(DIALOG_STYLESHEET)
+        self._setup_ui(wrong, correct, case_sensitive)
+
+    def _setup_ui(self, wrong: str, correct: str, case_sensitive: bool):
+        layout = QVBoxLayout(self)
+
+        # Wrong spelling field
+        wrong_label = QLabel("Неправильное написание:")
+        layout.addWidget(wrong_label)
+        self.wrong_input = QLineEdit()
+        self.wrong_input.setText(wrong)
+        self.wrong_input.setPlaceholderText("Например: торопинка")
+        layout.addWidget(self.wrong_input)
+
+        # Correct spelling field
+        correct_label = QLabel("Правильное написание:")
+        layout.addWidget(correct_label)
+        self.correct_input = QLineEdit()
+        self.correct_input.setText(correct)
+        self.correct_input.setPlaceholderText("Например: переписка")
+        layout.addWidget(self.correct_input)
+
+        # Case sensitive checkbox
+        self.case_sensitive_cb = QCheckBox("С учетом регистра")
+        self.case_sensitive_cb.setChecked(case_sensitive)
+        layout.addWidget(self.case_sensitive_cb)
+
+        layout.addSpacing(20)
+
+        # Buttons
+        buttons = QHBoxLayout()
+        ok_btn = QPushButton("OK")
+        ok_btn.clicked.connect(self.accept)
+        cancel_btn = QPushButton("Отмена")
+        cancel_btn.clicked.connect(self.reject)
+        buttons.addStretch()
+        buttons.addWidget(ok_btn)
+        buttons.addWidget(cancel_btn)
+        layout.addLayout(buttons)
+
+    def get_entry(self) -> dict:
+        """Get the dictionary entry from dialog inputs."""
+        return {
+            "wrong": self.wrong_input.text().strip(),
+            "correct": self.correct_input.text().strip(),
+            "case_sensitive": self.case_sensitive_cb.isChecked()
+        }
+
+    def accept(self):
+        """Validate and accept the dialog."""
+        wrong = self.wrong_input.text().strip()
+        correct = self.correct_input.text().strip()
+
+        if not wrong or not correct:
+            QMessageBox.warning(self, "Ошибка", "Заполните оба поля")
+            return
+
+        if wrong == correct:
+            QMessageBox.warning(self, "Ошибка", "Значения не должны быть одинаковыми")
+            return
+
+        super().accept()
+
+
 class GradientWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -633,18 +707,69 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.tabs)
 
         self._create_settings_tab()
+        self._create_dictionary_tab()
         self._create_history_tab()
 
     def _create_settings_tab(self):
+        """Create settings tab - minimal version."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
+        # Use scroll area for proper layout
+        from PyQt6.QtWidgets import QScrollArea
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("QScrollArea { border: none; }")
         content = QWidget()
         scroll_layout = QVBoxLayout(content)
 
+        # === Quality Profile Selection (Phase 4) ===
+        quality_group = QGroupBox("Профиль качества")
+        quality_layout = QVBoxLayout(quality_group)
+
+        # Create button group for radio-like behavior
+        self.quality_profile_group = QButtonGroup()
+        self.quality_profile_buttons = {}
+
+        for profile_id in ["fast", "balanced", "quality"]:
+            profile_info = QUALITY_PROFILES[profile_id]
+            btn = QPushButton(profile_info["description"])
+            btn.setCheckable(True)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {COLORS['bg_mid']};
+                    color: {COLORS['text_primary']};
+                    border: 2px solid {COLORS['border']};
+                    border-radius: 8px;
+                    padding: 12px 8px;
+                    text-align: center;
+                    font-size: 12px;
+                }}
+                QPushButton:checked {{
+                    background-color: {COLORS['accent_primary']};
+                    border-color: {COLORS['accent_secondary']};
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{
+                    border-color: {COLORS['accent_primary']};
+                }}
+            """)
+            self.quality_profile_buttons[profile_id] = btn
+            self.quality_profile_group.addButton(btn, int(profile_id == "fast") + int(profile_id == "balanced") * 2 + int(profile_id == "quality") * 3)
+            quality_layout.addWidget(btn)
+
+        # Set current profile
+        current_profile = self.config.quality_profile if self.config else "balanced"
+        if current_profile in self.quality_profile_buttons:
+            self.quality_profile_buttons[current_profile].setChecked(True)
+
+        scroll_layout.addWidget(quality_group)
+
+        # Info label
+        scroll_layout.addWidget(QLabel(f"Бэкенд: {self.config.backend if self.config else 'N/A'}"))
+        scroll_layout.addWidget(QLabel(f"Модель: {self.config.model_size if self.config else 'N/A'}"))
+
+        # Backend combo
         backend_group = QGroupBox("Движок")
         backend_layout = QVBoxLayout(backend_group)
         self.backend_combo = QComboBox()
@@ -655,13 +780,22 @@ class SettingsDialog(QDialog):
         backend_layout.addWidget(self.backend_combo)
         scroll_layout.addWidget(backend_group)
 
+        # Model combo
         model_group = QGroupBox("Модель")
         model_layout = QVBoxLayout(model_group)
         self.model_combo = QComboBox()
+        # Fill models based on current backend
         self._update_model_options()
         model_layout.addWidget(self.model_combo)
+
+        # Model info label
+        self.model_info_label = QLabel()
+        self.model_info_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 11px;")
+        model_layout.addWidget(self.model_info_label)
+
         scroll_layout.addWidget(model_group)
 
+        # Language combo
         lang_group = QGroupBox("Язык")
         lang_layout = QVBoxLayout(lang_group)
         self.lang_combo = QComboBox()
@@ -672,6 +806,7 @@ class SettingsDialog(QDialog):
         lang_layout.addWidget(self.lang_combo)
         scroll_layout.addWidget(lang_group)
 
+        # Behavior group
         behavior_group = QGroupBox("Поведение")
         behavior_layout = QVBoxLayout(behavior_group)
 
@@ -727,10 +862,107 @@ class SettingsDialog(QDialog):
         mouse_layout.addWidget(self.mouse_button_combo)
 
         scroll_layout.addWidget(mouse_group)
-        scroll_layout.addStretch()
 
+        # VAD Settings group
+        vad_group = QGroupBox("Голосовая активность (VAD)")
+        vad_layout = QVBoxLayout(vad_group)
+
+        # VAD Threshold slider
+        threshold_layout = QHBoxLayout()
+        threshold_label = QLabel("Порог:")
+        threshold_label.setFixedWidth(80)
+        threshold_layout.addWidget(threshold_label)
+
+        self.vad_threshold_slider = QSlider(Qt.Orientation.Horizontal)
+        self.vad_threshold_slider.setRange(0, 100)  # 0.0-1.0
+        vad_layout.addWidget(QLabel("Чувствительность детекции речи"))
+        vad_layout.addWidget(self.vad_threshold_slider)
+
+        self.vad_threshold_value = QLabel("0.50")
+        self.vad_threshold_value.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.vad_threshold_value.setFixedWidth(50)
+        vad_layout.addWidget(self.vad_threshold_value)
+
+        threshold_positions = QHBoxLayout()
+        threshold_positions.addWidget(QLabel("Тихий"))
+        threshold_positions.addStretch()
+        threshold_positions.addWidget(QLabel("Чувствительный"))
+        vad_layout.addLayout(threshold_positions)
+
+        # Min Silence Duration slider
+        vad_layout.addSpacing(10)
+        vad_layout.addWidget(QLabel("Мин. тишина перед остановкой:"))
+
+        silence_layout = QHBoxLayout()
+        self.min_silence_slider = QSlider(Qt.Orientation.Horizontal)
+        self.min_silence_slider.setRange(100, 3000)  # 100-3000ms
+        vad_layout.addWidget(self.min_silence_slider)
+
+        self.min_silence_value = QLabel("800мс")
+        self.min_silence_value.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.min_silence_value.setFixedWidth(60)
+        vad_layout.addWidget(self.min_silence_value)
+
+        silence_positions = QHBoxLayout()
+        silence_positions.addWidget(QLabel("Коротко"))
+        silence_positions.addStretch()
+        silence_positions.addWidget(QLabel("Долго"))
+        vad_layout.addLayout(silence_positions)
+
+        # Reset button
+        vad_layout.addSpacing(10)
+        vad_reset_btn = QPushButton("Сбросить настройки VAD")
+        vad_reset_btn.clicked.connect(self._reset_vad_defaults)
+        vad_layout.addWidget(vad_reset_btn)
+
+        scroll_layout.addWidget(vad_group)
+
+        # Noise Reduction group
+        noise_group = QGroupBox("Шумоподавление")
+        noise_layout = QVBoxLayout(noise_group)
+
+        # WebRTC Enable checkbox
+        self.webrtc_enabled_cb = QCheckBox("Включить обработку WebRTC")
+        self.webrtc_enabled_cb.setToolTip("Шумоподавление и автоматическая регулировка усиления")
+        noise_layout.addWidget(self.webrtc_enabled_cb)
+
+        # Noise Suppression Level slider
+        noise_layout.addSpacing(5)
+        noise_layout.addWidget(QLabel("Уровень подавления шума:"))
+
+        self.noise_level_slider = QSlider(Qt.Orientation.Horizontal)
+        self.noise_level_slider.setRange(0, 4)
+        noise_layout.addWidget(self.noise_level_slider)
+
+        self.noise_level_value = QLabel("Умеренно")
+        self.noise_level_value.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        noise_layout.addWidget(self.noise_level_value)
+
+        noise_positions = QHBoxLayout()
+        noise_positions.addWidget(QLabel("Выкл"))
+        noise_positions.addWidget(QLabel("Слабо"))
+        noise_positions.addWidget(QLabel("Умеренно"))
+        noise_positions.addWidget(QLabel("Сильно"))
+        noise_positions.addWidget(QLabel("Очень"))
+        noise_layout.addLayout(noise_positions)
+
+        # Noise status indicator
+        self.noise_status_label = QLabel("(Активно)")
+        self.noise_status_label.setStyleSheet(f"color: {COLORS['accent_secondary']}; font-size: 11px;")
+        noise_layout.addWidget(self.noise_status_label)
+
+        # Reset button
+        noise_layout.addSpacing(10)
+        noise_reset_btn = QPushButton("Сбросить настройки шума")
+        noise_reset_btn.clicked.connect(self._reset_noise_defaults)
+        noise_layout.addWidget(noise_reset_btn)
+
+        scroll_layout.addWidget(noise_group)
+
+        scroll_layout.addStretch()
         scroll.setWidget(content)
         layout.addWidget(scroll)
+
         self.tabs.addTab(tab, "Настройки")
 
     def _create_history_tab(self):
@@ -762,14 +994,220 @@ class SettingsDialog(QDialog):
         self.tabs.addTab(tab, "История")
         self._update_history_display()
 
+    def _create_dictionary_tab(self):
+        """Create the user dictionary tab for custom corrections."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # Search filter
+        search_layout = QHBoxLayout()
+        search_label = QLabel("Поиск:")
+        self.dictionary_search = QLineEdit()
+        self.dictionary_search.setPlaceholderText("Введите текст для поиска...")
+        self.dictionary_search.textChanged.connect(self._filter_dictionary)
+        search_layout.addWidget(search_label)
+        search_layout.addWidget(self.dictionary_search)
+        layout.addLayout(search_layout)
+
+        # Dictionary table
+        self.dictionary_table = QTableWidget()
+        self.dictionary_table.setColumnCount(3)
+        self.dictionary_table.setHorizontalHeaderLabels(["Неправильно", "Правильно", "С учетом регистра"])
+        self.dictionary_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.dictionary_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.dictionary_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.dictionary_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.dictionary_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        layout.addWidget(self.dictionary_table)
+
+        # Buttons
+        buttons_layout = QHBoxLayout()
+
+        self.dict_add_btn = QPushButton("Добавить")
+        self.dict_add_btn.clicked.connect(self._add_dictionary_entry)
+        buttons_layout.addWidget(self.dict_add_btn)
+
+        self.dict_edit_btn = QPushButton("Изменить")
+        self.dict_edit_btn.clicked.connect(self._edit_dictionary_entry)
+        buttons_layout.addWidget(self.dict_edit_btn)
+
+        self.dict_delete_btn = QPushButton("Удалить")
+        self.dict_delete_btn.clicked.connect(self._delete_dictionary_entry)
+        buttons_layout.addWidget(self.dict_delete_btn)
+
+        layout.addLayout(buttons_layout)
+
+        # Import/Export buttons
+        io_layout = QHBoxLayout()
+
+        self.dict_import_btn = QPushButton("Импорт")
+        self.dict_import_btn.clicked.connect(self._import_dictionary)
+        io_layout.addWidget(self.dict_import_btn)
+
+        self.dict_export_btn = QPushButton("Экспорт")
+        self.dict_export_btn.clicked.connect(self._export_dictionary)
+        io_layout.addWidget(self.dict_export_btn)
+
+        layout.addLayout(io_layout)
+
+        self.tabs.addTab(tab, "Словарь")
+        self._update_dictionary_display()
+
+    def _update_dictionary_display(self):
+        """Update the dictionary table with current entries."""
+        if not hasattr(self, 'dictionary_table'):
+            return
+
+        self.dictionary_table.setRowCount(0)
+
+        if not self.config:
+            return
+
+        for entry in self.config.user_dictionary:
+            row = self.dictionary_table.rowCount()
+            self.dictionary_table.insertRow(row)
+            self.dictionary_table.setItem(row, 0, QTableWidgetItem(entry.get("wrong", "")))
+            self.dictionary_table.setItem(row, 1, QTableWidgetItem(entry.get("correct", "")))
+
+            case_sensitive = entry.get("case_sensitive", False)
+            case_item = QTableWidgetItem("Да" if case_sensitive else "Нет")
+            case_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.dictionary_table.setItem(row, 2, case_item)
+
+    def _filter_dictionary(self, text: str):
+        """Filter dictionary table by search text."""
+        search_text = text.lower()
+        for row in range(self.dictionary_table.rowCount()):
+            show = False
+            for col in range(2):  # Only check wrong/correct columns
+                item = self.dictionary_table.item(row, col)
+                if item and search_text in item.text().lower():
+                    show = True
+                    break
+            self.dictionary_table.setRowHidden(row, not show)
+
+    def _add_dictionary_entry(self):
+        """Add a new dictionary entry."""
+        dialog = DictionaryEntryDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            entry = dialog.get_entry()
+            self.config.user_dictionary.append(entry)
+            self.config.save()
+            self._update_dictionary_display()
+            # Update transcriber
+            if hasattr(self, 'transcriber'):
+                self.transcriber.set_user_dictionary(self.config.user_dictionary)
+
+    def _edit_dictionary_entry(self):
+        """Edit selected dictionary entry."""
+        selected = self.dictionary_table.selectedItems()
+        if not selected:
+            QMessageBox.warning(self, "Предупреждение", "Выберите запись для изменения")
+            return
+
+        row = self.dictionary_table.currentRow()
+        wrong = self.dictionary_table.item(row, 0).text()
+        correct = self.dictionary_table.item(row, 1).text()
+        case_sensitive = self.dictionary_table.item(row, 2).text() == "Да"
+
+        dialog = DictionaryEntryDialog(self, wrong, correct, case_sensitive)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            entry = dialog.get_entry()
+            # Update the entry at this row
+            self.config.user_dictionary[row] = entry
+            self.config.save()
+            self._update_dictionary_display()
+            # Update transcriber
+            if hasattr(self, 'transcriber'):
+                self.transcriber.set_user_dictionary(self.config.user_dictionary)
+
+    def _delete_dictionary_entry(self):
+        """Delete selected dictionary entry."""
+        selected = self.dictionary_table.selectedItems()
+        if not selected:
+            QMessageBox.warning(self, "Предупреждение", "Выберите запись для удаления")
+            return
+
+        row = self.dictionary_table.currentRow()
+        wrong = self.config.user_dictionary[row].get("wrong", "")
+
+        reply = QMessageBox.question(
+            self, "Подтверждение",
+            f'Удалить запись "{wrong}"?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            del self.config.user_dictionary[row]
+            self.config.save()
+            self._update_dictionary_display()
+            # Update transcriber
+            if hasattr(self, 'transcriber'):
+                self.transcriber.set_user_dictionary(self.config.user_dictionary)
+
+    def _import_dictionary(self):
+        """Import dictionary from JSON file."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Импорт словаря", "", "JSON Files (*.json)"
+        )
+        if file_path:
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    imported = json.load(f)
+
+                # Merge with existing (no duplicates by "wrong" field)
+                existing_wrongs = {e.get("wrong") for e in self.config.user_dictionary}
+                for entry in imported:
+                    wrong = entry.get("wrong")
+                    if wrong and wrong not in existing_wrongs:
+                        self.config.user_dictionary.append(entry)
+                        existing_wrongs.add(wrong)
+
+                self.config.save()
+                self._update_dictionary_display()
+                # Update transcriber
+                if hasattr(self, 'transcriber'):
+                    self.transcriber.set_user_dictionary(self.config.user_dictionary)
+
+                QMessageBox.information(self, "Успех", f"Импортировано записей: {len(imported)}")
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось импортировать: {e}")
+
+    def _export_dictionary(self):
+        """Export dictionary to JSON file."""
+        if not self.config.user_dictionary:
+            QMessageBox.information(self, "Информация", "Словарь пуст")
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Экспорт словаря", "dictionary.json", "JSON Files (*.json)"
+        )
+        if file_path:
+            try:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(self.config.user_dictionary, f, ensure_ascii=False, indent=2)
+                QMessageBox.information(self, "Успех", f"Экспортировано записей: {len(self.config.user_dictionary)}")
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось экспортировать: {e}")
+
     def _update_model_options(self):
         self.model_combo.clear()
         if not self.config:
             return
         backend = self.backend_combo.currentData() or self.config.backend
         models = {"whisper": WHISPER_MODELS, "sherpa": SHERPA_MODELS, "podlodka-turbo": PODLODKA_MODELS}.get(backend, {})
-        for mid, mname in models.items():
-            self.model_combo.addItem(mname, mid)
+
+        # Sort models by RTF (fastest first)
+        sorted_models = sorted(models.items(), key=lambda x: MODEL_METADATA.get(x[0], {}).get("rtf", 1.0))
+
+        for mid, mname in sorted_models:
+            # Format with metadata
+            meta = MODEL_METADATA.get(mid, {})
+            ram = meta.get("ram_mb", "?")
+            desc = meta.get("description", "")
+            display_text = f"{mid} — {ram}MB — {desc}"
+            self.model_combo.addItem(display_text, mid)
+
         if self.config.model_size in models:
             self.model_combo.setCurrentIndex(list(models.keys()).index(self.config.model_size))
 
@@ -795,6 +1233,21 @@ class SettingsDialog(QDialog):
             self.stats_words.setText(f"Слов: {self.config.total_words:,}")
             self.stats_recordings.setText(f"Записей: {self.config.total_recordings:,}")
             self.stats_saved.setText(f"Время: {self.config.total_seconds_saved/60:.1f} мин")
+
+    def _reset_vad_defaults(self):
+        """Reset VAD settings to defaults."""
+        self.vad_threshold_slider.setValue(50)
+        self.min_silence_slider.setValue(800)
+
+    def _noise_level_changed(self, value: int):
+        """Handle noise level slider change."""
+        labels = ["Выкл", "Слабо", "Умеренно", "Сильно", "Очень сильно"]
+        self.noise_level_value.setText(labels[value] if 0 <= value < len(labels) else "Умеренно")
+
+    def _reset_noise_defaults(self):
+        """Reset noise reduction settings to defaults."""
+        self.webrtc_enabled_cb.setChecked(True)
+        self.noise_level_slider.setValue(2)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -836,6 +1289,8 @@ class MainWindow(QMainWindow):
             vad_threshold=self.config.vad_threshold,
             min_silence_duration_ms=self.config.min_silence_duration_ms,
             min_speech_duration_ms=self.config.min_speech_duration_ms,
+            # User dictionary
+            user_dictionary=self.config.user_dictionary,
         )
         self.hotkey_manager = HotkeyManager(on_hotkey=self._on_hotkey)
         self.history_manager = HistoryManager(max_entries=50)
@@ -1500,22 +1955,30 @@ class MainWindow(QMainWindow):
             self._settings.tabs.setCurrentIndex(1)
 
     def _show_settings(self):
-        if not self._settings:
-            self._settings = SettingsDialog(self, self.config, self.history_manager)
-            self._settings.backend_combo.currentIndexChanged.connect(self._backend_changed)
-            self._settings.model_combo.currentIndexChanged.connect(self._model_changed)
-            self._settings.lang_combo.currentIndexChanged.connect(self._lang_changed)
-            self._settings.auto_copy_cb.toggled.connect(lambda c: setattr(self.config, 'auto_copy', c) or self.config.save())
-            self._settings.auto_paste_cb.toggled.connect(lambda c: setattr(self.config, 'auto_paste', c) or self.config.save())
-            self._settings.paste_method_combo.currentIndexChanged.connect(self._paste_method_changed)
-            self._settings.always_top_cb.toggled.connect(self._top_changed)
-            self._settings.post_process_cb.toggled.connect(self._post_changed)
-            self._settings.enable_mouse_button_cb.toggled.connect(self._on_mouse_setting_changed)
-            self._settings.mouse_button_combo.currentIndexChanged.connect(self._on_mouse_setting_changed)
+        """Show settings dialog."""
+        try:
+            if not self._settings:
+                self._settings = SettingsDialog(self, self.config, self.history_manager)
 
-        self._settings.move(self.pos().x(), self.pos().y() + self.height() + 10)
-        self._settings.show()
-        self._settings.raise_()
+                # Connect quality profile button group (radio-like behavior)
+                profile_ids = {0: "fast", 1: "balanced", 2: "quality"}
+                self._settings.quality_profile_group.idClicked.connect(
+                    lambda btn_id: self._quality_profile_changed(profile_ids.get(btn_id, "balanced"))
+                )
+
+                # Connect backend change to update models
+                self._settings.backend_combo.currentIndexChanged.connect(self._backend_changed)
+
+            self._settings.move(self.pos().x(), self.pos().y() + self.height() + 10)
+            self._settings.show()
+            self._settings.raise_()
+        except Exception as e:
+            print(f"[ERROR] _show_settings failed: {e}")
+            import traceback
+            traceback.print_exc()
+            # Fallback to simple dialog
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "Ошибка", f"Не удалось открыть настройки:\n{e}")
 
     def _backend_changed(self):
         bid = self._settings.backend_combo.currentData()
@@ -1530,9 +1993,40 @@ class MainWindow(QMainWindow):
     def _model_changed(self):
         mid = self._settings.model_combo.currentData()
         if mid and mid != self.config.model_size:
+            # Check RAM requirement
+            meta = MODEL_METADATA.get(mid, {})
+            ram_mb = meta.get("ram_mb", 0)
+
+            if ram_mb > 2000:
+                reply = QMessageBox.question(
+                    self, "Предупреждение",
+                    f"Эта модель требует ~{ram_mb}MB RAM.\n"
+                    f"Может работать медленно на старых системах.\n\n"
+                    f"Продолжить?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.No:
+                    # Revert to previous model
+                    idx = self._settings.model_combo.findData(self.config.model_size)
+                    if idx >= 0:
+                        self._settings.model_combo.setCurrentIndex(idx)
+                    return
+
             self.config.model_size = mid
             self.config.save()
             self.transcriber.switch_backend(self.config.backend, mid)
+            self._update_model_info_label()
+
+    def _update_model_info_label(self):
+        """Update model info label below dropdown."""
+        if not hasattr(self._settings, 'model_info_label'):
+            return
+
+        mid = self.config.model_size
+        meta = MODEL_METADATA.get(mid, {})
+        ram = meta.get("ram_mb", "?")
+        rtf = meta.get("rtf", "?")
+        self._settings.model_info_label.setText(f"RAM: ~{ram}MB | RTF: {rtf}x")
 
     def _lang_changed(self):
         lid = self._settings.lang_combo.currentData()
@@ -1562,6 +2056,131 @@ class MainWindow(QMainWindow):
         self.config.enable_post_processing = checked
         self.config.save()
         self.transcriber.enable_post_processing = checked
+
+    def _quality_profile_changed(self, profile: str):
+        """Handle quality profile change."""
+        try:
+            if profile != self.config.quality_profile:
+                # Apply profile preset
+                self.config.apply_quality_profile(profile)
+
+                # Update transcriber settings
+                self.transcriber.switch_backend(self.config.backend, self.config.model_size)
+                self.transcriber.vad_threshold = self.config.vad_threshold
+                self.transcriber.min_silence_duration_ms = self.config.min_silence_duration_ms
+                self.transcriber.enable_post_processing = self.config.enable_post_processing
+
+                # Update UI controls to reflect new values
+                if self._settings:
+                    # Update backend combo
+                    backend_idx = self._settings.backend_combo.findData(self.config.backend)
+                    if backend_idx >= 0:
+                        self._settings.backend_combo.setCurrentIndex(backend_idx)
+
+                    # Update model combo (will refresh based on backend)
+                    self._settings._update_model_options()
+
+                print(f"[INFO] Quality profile changed to: {profile}")
+        except Exception as e:
+            print(f"[ERROR] _quality_profile_changed failed: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _init_vad_controls(self):
+        """Initialize VAD controls from config values."""
+        # Set threshold slider
+        threshold_value = int(self.config.vad_threshold * 100)
+        self._settings.vad_threshold_slider.setValue(threshold_value)
+        self._settings.vad_threshold_value.setText(f"{self.config.vad_threshold:.2f}")
+
+        # Set silence slider
+        self._settings.min_silence_slider.setValue(self.config.min_silence_duration_ms)
+        self._settings.min_silence_value.setText(f"{self.config.min_silence_duration_ms}мс")
+
+        # Connect signals
+        self._settings.vad_threshold_slider.valueChanged.connect(self._vad_threshold_changed)
+        self._settings.min_silence_slider.valueChanged.connect(self._min_silence_changed)
+
+    def _vad_threshold_changed(self, value: int):
+        """Handle VAD threshold slider change."""
+        threshold = value / 100.0
+        self.config.vad_threshold = threshold
+        self.config.save()
+        self.transcriber.vad_threshold = threshold
+        self._settings.vad_threshold_value.setText(f"{threshold:.2f}")
+
+    def _min_silence_changed(self, value: int):
+        """Handle min silence duration slider change."""
+        self.config.min_silence_duration_ms = value
+        self.config.save()
+        self.transcriber.min_silence_duration_ms = value
+        self._settings.min_silence_value.setText(f"{value}мс")
+
+    def _reset_vad_defaults(self):
+        """Reset VAD settings to defaults."""
+        self.config.vad_threshold = 0.5
+        self.config.min_silence_duration_ms = 800
+        self.config.save()
+        self.transcriber.vad_threshold = 0.5
+        self.transcriber.min_silence_duration_ms = 800
+
+        # Update UI
+        self._settings.vad_threshold_slider.setValue(50)
+        self._settings.min_silence_slider.setValue(800)
+
+    def _init_noise_controls(self):
+        """Initialize noise reduction controls from config values."""
+        # Set checkbox
+        self._settings.webrtc_enabled_cb.setChecked(self.config.webrtc_enabled)
+
+        # Set noise level slider
+        self._settings.noise_level_slider.setValue(self.config.noise_suppression_level)
+        self._update_noise_level_label(self.config.noise_suppression_level)
+
+        # Update status indicator
+        self._update_noise_status()
+
+        # Connect signals
+        self._settings.webrtc_enabled_cb.toggled.connect(self._webrtc_enabled_changed)
+        self._settings.noise_level_slider.valueChanged.connect(self._noise_level_changed)
+
+    def _webrtc_enabled_changed(self, checked: bool):
+        """Handle WebRTC enabled checkbox change."""
+        self.config.webrtc_enabled = checked
+        self.config.save()
+        self._update_noise_status()
+
+    def _noise_level_changed(self, value: int):
+        """Handle noise level slider change."""
+        self.config.noise_suppression_level = value
+        self.config.save()
+        self._update_noise_level_label(value)
+
+    def _update_noise_level_label(self, level: int):
+        """Update noise level text label."""
+        labels = ["Выкл", "Слабо", "Умеренно", "Сильно", "Очень сильно"]
+        self._settings.noise_level_value.setText(labels[level] if 0 <= level < len(labels) else "Умеренно")
+
+    def _update_noise_status(self):
+        """Update noise reduction status indicator."""
+        if hasattr(self._settings, 'noise_status_label'):
+            if self.config.webrtc_enabled:
+                self._settings.noise_status_label.setText("(Активно)")
+                self._settings.noise_status_label.setStyleSheet(f"color: {COLORS['accent_secondary']};")
+            else:
+                self._settings.noise_status_label.setText("(Отключено)")
+                self._settings.noise_status_label.setStyleSheet(f"color: {COLORS['text_secondary']};")
+
+    def _reset_noise_defaults(self):
+        """Reset noise reduction settings to defaults."""
+        self.config.webrtc_enabled = True
+        self.config.noise_suppression_level = 2
+        self.config.save()
+
+        # Update UI
+        self._settings.webrtc_enabled_cb.setChecked(True)
+        self._settings.noise_level_slider.setValue(2)
+        self._update_noise_status()
 
     def _on_mouse_setting_changed(self, value=None):
         """Обновить настройку мыши и перезапустить обработчик."""
