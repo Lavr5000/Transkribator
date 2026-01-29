@@ -122,7 +122,8 @@ class AudioRecorder:
             pass  # Drop frame if queue is full
 
         # Calculate audio level for visualization (use cleaned audio)
-        if self.on_level_update and not self._shutting_down:
+        # Use _recording flag instead of _shutting_down for more reliable callback
+        if self.on_level_update and self._recording:
             try:
                 level = np.abs(data).mean()
                 self.on_level_update(float(level))
@@ -140,7 +141,8 @@ class AudioRecorder:
                 return True
 
             try:
-                # Reset state
+                # Reset state - ALWAYS reset shutting_down flag
+                # This ensures on_level_update callback works even after previous errors
                 self._audio_data = []
                 self._audio_queue = queue.Queue()
                 self._shutting_down = False
@@ -171,6 +173,7 @@ class AudioRecorder:
                 return True
             except Exception as e:
                 print(f"Failed to start recording: {e}")
+                # Ensure shutting_down is reset even on error
                 self._shutting_down = False
                 return False
 
