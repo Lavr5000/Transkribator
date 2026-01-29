@@ -15,6 +15,14 @@ try:
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
 
+# Import enhanced text processor
+try:
+    from ..text_processor_enhanced import EnhancedTextProcessor
+    ENHANCED_PROCESSOR_AVAILABLE = True
+except ImportError:
+    from ..text_processor import AdvancedTextProcessor
+    ENHANCED_PROCESSOR_AVAILABLE = False
+
 try:
     import scipy.signal
     SCIPY_AVAILABLE = True
@@ -60,6 +68,15 @@ class PodlodkaTurboBackend(BaseBackend):
         self._vad_threshold = vad_threshold
         self._min_silence_duration_ms = min_silence_duration_ms
         self._min_speech_duration_ms = min_speech_duration_ms
+
+        # Initialize text processor with backend-aware configuration
+        if ENHANCED_PROCESSOR_AVAILABLE:
+            self.text_processor = EnhancedTextProcessor(
+                language=self.language,
+                backend=self.backend_name
+            )
+        else:
+            self.text_processor = AdvancedTextProcessor(language=self.language)
 
     def _detect_device(self) -> Tuple[str, str]:
         """Detect the best device and dtype."""
@@ -268,6 +285,10 @@ class PodlodkaTurboBackend(BaseBackend):
 
             # Clean up text
             text = text.strip()
+
+            # Apply text post-processing (backend-aware)
+            if hasattr(self, 'text_processor') and self.text_processor:
+                text = self.text_processor.process(text)
 
             process_time = time.time() - start_time
 

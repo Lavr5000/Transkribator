@@ -40,24 +40,25 @@ except ImportError:
 class EnhancedTextProcessor:
     """Enhanced text processor with punctuation restoration and Sherpa-specific corrections."""
 
-    def __init__(self, language: str = "ru", enable_corrections: bool = True, enable_punctuation: bool = True, enable_phonetics: bool = True, enable_morphology: bool = True, enable_proper_nouns: bool = True):
+    def __init__(self, language: str = "ru", enable_corrections: bool = True, enable_punctuation: bool = True, enable_phonetics: bool = True, enable_morphology: bool = True, enable_proper_nouns: bool = True, backend: str = "sherpa"):
         """
         Initialize enhanced text processor.
 
         Args:
             language: Target language code (ru, en, etc.)
             enable_corrections: Whether to enable error corrections
-            enable_punctuation: Whether to restore punctuation
+            enable_punctuation: Whether to restore punctuation (will be overridden by backend config)
             enable_phonetics: Whether to enable phonetic corrections (voiced/unvoiced)
             enable_morphology: Whether to enable morphological corrections (gender, case)
             enable_proper_nouns: Whether to enable proper noun capitalization
+            backend: Backend type for adaptive processing ("whisper", "sherpa", "podlodkaturbo")
         """
         self.language = language
+        self.backend = backend.lower()
         self.enable_corrections = enable_corrections
-        self.enable_punctuation = enable_punctuation
-        self.enable_phonetics = enable_phonetics and PHONETICS_AVAILABLE
-        self.enable_morphology = enable_morphology and MORPHOLOGY_AVAILABLE
-        self.enable_proper_nouns = enable_proper_nouns and PROPER_NOUNS_AVAILABLE
+
+        # Configure processing flags based on backend type
+        self._configure_for_backend(enable_phonetics, enable_morphology, enable_proper_nouns)
 
         self._load_corrections()
 
@@ -67,29 +68,51 @@ class EnhancedTextProcessor:
         # Punctuation model will be loaded lazily on first use
         self.punctuation_model = None
 
-        # Initialize phonetic corrector
+        # Initialize components after backend configuration
+        # (enable_phonetics, enable_morphology, enable_proper_nouns are set by _configure_for_backend)
         if self.enable_phonetics:
             self.phonetic_corrector = PhoneticCorrector(enable_validation=True)
         else:
             self.phonetic_corrector = None
 
-        # Initialize morphology corrector
         if self.enable_morphology:
             self.morphology_corrector = MorphologyCorrector()
         else:
             self.morphology_corrector = None
 
-        # Initialize proper noun dictionary
         if self.enable_proper_nouns:
             self.proper_nouns = ProperNounDict()
         else:
             self.proper_nouns = None
 
-        # Initialize morphological corrector
-        if self.enable_morphology:
-            self.morphology_corrector = MorphologyCorrector()
+    def _configure_for_backend(self, enable_phonetics: bool, enable_morphology: bool, enable_proper_nouns: bool):
+        """Configure processing flags based on backend type.
+
+        Different backends produce different output quality:
+        - Whisper: Has punctuation, capitalization (minimal processing needed)
+        - Sherpa/Podlodka: Raw lowercase text (full processing needed)
+
+        Args:
+            enable_phonetics: Base preference for phonetic corrections
+            enable_morphology: Base preference for morphological corrections
+            enable_proper_nouns: Base preference for proper noun capitalization
+        """
+        if self.backend == "whisper":
+            # Whisper already provides punctuation and capitalization
+            # Skip punctuation restoration to avoid double punctuation
+            # Skip advanced corrections (Whisper has fewer phonetic/morphological errors)
+            self.enable_punctuation = False
+            self.enable_phonetics = False
+            self.enable_morphology = False
         else:
-            self.morphology_corrector = None
+            # Sherpa, Podlodka: No punctuation, raw lowercase text
+            # Enable full processing pipeline
+            self.enable_punctuation = True
+            self.enable_phonetics = enable_phonetics and PHONETICS_AVAILABLE
+            self.enable_morphology = enable_morphology and MORPHOLOGY_AVAILABLE
+
+        # Proper nouns are useful for all backends
+        self.enable_proper_nouns = enable_proper_nouns and PROPER_NOUNS_AVAILABLE
 
     def _load_corrections(self):
         """Load error correction rules for the target language."""
@@ -598,20 +621,60 @@ class EnhancedTextProcessor:
         return text
 
     def _fix_capitalization(self, text: str) -> str:
-        """Fix capitalization issues."""
+        """
+        Fix capitalization issues with improved handling of sentence endings.
+
+        Handles:
+        - First letter capitalization
+        - Capitalization after sentence-ending punctuation (., !, ?)
+        - Multiple punctuation (!!, ??, !?)
+        - Ellipsis (...)
+        - Quotes/parens after punctuation
+        - Multiple spaces after punctuation
+        """
         if not text:
             return text
 
-        # Ensure first letter is capitalized
+        # Step 1: Ensure first letter is capitalized
         text = text[0].upper() + text[1:] if text else text
 
-        # Capitalize after sentence endings
-        sentences = re.split(r'([.!?]\s+)', text)
-        for i in range(len(sentences)):
-            if i % 2 == 0 and sentences[i]:
-                sentences[i] = sentences[i][0].upper() + sentences[i][1:] if sentences[i] else sentences[i]
+        # Step 2: Capitalize after sentence endings with proper space handling
+        # Pattern: punctuation followed by space(s) and lowercase letter
 
-        text = ''.join(sentences)
+        # Single sentence endings (. ! ?)
+        # Match: punctuation + spaces + lowercase letter
+        text = re.sub(r'([.!?])\s+([а-яa-z])', lambda m: m.group(1) + ' ' + m.group(2).upper(), text)
+
+        # Multiple punctuation (!!, ??, !?!, ???, etc.)
+        # Match: multiple punctuation + spaces + lowercase letter
+        text = re.sub(r'([.!?]{2,})\s+([а-яa-z])', lambda m: m.group(1) + ' ' + m.group(2).upper(), text)
+
+        # Step 3: Handle ellipsis (...) as sentence ending
+        # Ellipsis followed by space and lowercase letter should capitalize
+        text = re.sub(r'(\.\.\.)\s+([а-яa-z])', lambda m: m.group(1) + ' ' + m.group(2).upper(), text)
+
+        # Step 4: Handle punctuation without space (e.g., "word.Next")
+        # This adds space and capitalizes
+        text = re.sub(r'([.!?])([а-яa-z])', lambda m: m.group(1) + ' ' + m.group(2).upper(), text)
+
+        # Step 5: Handle multiple spaces after punctuation (normalize to single space)
+        text = re.sub(r'([.!?])\s{2,}', r'\1 ', text)
+
+        # Step 6: Ensure first letter after opening quote/paren is capitalized
+        # e.g., ("hello") -> ("Hello")
+        text = re.sub(r'([("\'])\s*([а-яa-z])', lambda m: m.group(1) + m.group(2).upper(), text)
+
+        # Step 7: Handle quotes/parens immediately after punctuation without space
+        # e.g., "word."next" -> "word." Next"
+        # e.g., "word!"next" -> "word!" Next"
+        text = re.sub(r'([.!?])([)"\'])([а-яa-z])', lambda m: m.group(1) + m.group(2) + ' ' + m.group(3).upper(), text)
+
+        # Step 8: Handle parentheses after punctuation with space
+        # e.g., "word. (hello)" -> "word. (Hello)"
+        text = re.sub(r'([.!?])\s+(\()([а-яa-z])', lambda m: m.group(1) + ' ' + m.group(2) + m.group(3).upper(), text)
+
+        # Final cleanup: normalize multiple spaces to single space
+        text = re.sub(r'\s{2,}', ' ', text)
 
         return text
 

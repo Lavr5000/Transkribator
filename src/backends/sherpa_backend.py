@@ -109,6 +109,15 @@ class SherpaBackend(BaseBackend):
         if self.model_size.startswith("giga-am"):
             self.language = "ru"
 
+        # Initialize text processor with backend-aware configuration
+        if ENHANCED_PROCESSOR_AVAILABLE:
+            self.text_processor = EnhancedTextProcessor(
+                language=self.language,
+                backend=self.backend_name
+            )
+        else:
+            self.text_processor = AdvancedTextProcessor(language=self.language)
+
     def _get_model_dir(self) -> Path:
         """Get the model directory path."""
         if self.model_path:
@@ -325,6 +334,10 @@ class SherpaBackend(BaseBackend):
             self._recognizer.decode_stream(stream)
 
             text = stream.result.text.strip()
+
+            # Apply text post-processing (backend-aware)
+            if hasattr(self, 'text_processor') and self.text_processor:
+                text = self.text_processor.process(text)
 
             process_time = time.time() - start_time
 
