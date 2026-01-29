@@ -27,11 +27,20 @@ except ImportError:
     MorphologyCorrector = None
     print("[WARNING] morphology module not available")
 
+# Import proper noun corrections
+try:
+    from .proper_nouns import ProperNounDict
+    PROPER_NOUNS_AVAILABLE = True
+except ImportError:
+    PROPER_NOUNS_AVAILABLE = False
+    ProperNounDict = None
+    print("[WARNING] proper_nouns module not available")
+
 
 class EnhancedTextProcessor:
     """Enhanced text processor with punctuation restoration and Sherpa-specific corrections."""
 
-    def __init__(self, language: str = "ru", enable_corrections: bool = True, enable_punctuation: bool = True, enable_phonetics: bool = True, enable_morphology: bool = True):
+    def __init__(self, language: str = "ru", enable_corrections: bool = True, enable_punctuation: bool = True, enable_phonetics: bool = True, enable_morphology: bool = True, enable_proper_nouns: bool = True):
         """
         Initialize enhanced text processor.
 
@@ -41,12 +50,14 @@ class EnhancedTextProcessor:
             enable_punctuation: Whether to restore punctuation
             enable_phonetics: Whether to enable phonetic corrections (voiced/unvoiced)
             enable_morphology: Whether to enable morphological corrections (gender, case)
+            enable_proper_nouns: Whether to enable proper noun capitalization
         """
         self.language = language
         self.enable_corrections = enable_corrections
         self.enable_punctuation = enable_punctuation
         self.enable_phonetics = enable_phonetics and PHONETICS_AVAILABLE
         self.enable_morphology = enable_morphology and MORPHOLOGY_AVAILABLE
+        self.enable_proper_nouns = enable_proper_nouns and PROPER_NOUNS_AVAILABLE
 
         self._load_corrections()
 
@@ -61,6 +72,18 @@ class EnhancedTextProcessor:
             self.phonetic_corrector = PhoneticCorrector(enable_validation=True)
         else:
             self.phonetic_corrector = None
+
+        # Initialize morphology corrector
+        if self.enable_morphology:
+            self.morphology_corrector = MorphologyCorrector()
+        else:
+            self.morphology_corrector = None
+
+        # Initialize proper noun dictionary
+        if self.enable_proper_nouns:
+            self.proper_nouns = ProperNounDict()
+        else:
+            self.proper_nouns = None
 
         # Initialize morphological corrector
         if self.enable_morphology:
@@ -483,7 +506,11 @@ class EnhancedTextProcessor:
         # Step 6: Fix capitalization
         text = self._fix_capitalization(text)
 
-        # Step 7: Final cleanup
+        # Step 7: Proper noun capitalization
+        if self.enable_proper_nouns and self.proper_nouns:
+            text = self.proper_nouns.capitalize_known(text)
+
+        # Step 8: Final cleanup
         text = self._cleanup(text)
 
         return text
