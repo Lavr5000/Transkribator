@@ -1,199 +1,94 @@
-# Project State - Transkribator
+# Project State
 
-**Last updated:** 2025-01-29
+## Project Reference
 
----
+See: .planning/PROJECT.md (updated 2026-01-27)
+
+**Core value:** Точность распознавания русской речи на уровне WhisperTyping без существенной потери скорости
+**Current focus:** Phase 4: Advanced Features
 
 ## Current Position
 
-**Phase:** 03 of 5 (Text Processing)
-**Plan:** 03-05 (Improve Capitalization After Punctuation) - **COMPLETED**
-**Status:** In Progress
+Phase: 4 of 4 (Advanced Features)
+Plan: 0 of 5 in current phase
+Status: Ready to start
+Last activity: 2026-01-29 — Completed Phase 3 verification
 
-**Progress:**
-```
-Phase 1: Setup & Base Processing              [████████████████████████████] 100%
-Phase 2: Noise Reduction & VAD                [████████████████████████████] 100%
-Phase 3: Text Processing                      [████████░░░░░░░░░░░░░░░░░░░░]  40%
-Phase 4: Advanced Features                    [░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░]   0%
-Phase 5: Polish & Deploy                      [░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░]   0%
+Progress: [████████░░] 75%
 
-Overall: 48% complete
-```
+## Performance Metrics
 
----
+**Velocity:**
+- Total plans completed: 16
+- Average duration: 6.8 min
+- Total execution time: 1.83 hours
 
-## Recent Activity
+**By Phase:**
 
-**Today (2025-01-29):**
-- ✅ Completed 03-05: Improve Capitalization After Punctuation
-  - Enhanced `_fix_capitalization()` method
-  - Added support for multiple punctuation (!!, ??)
-  - Added ellipsis support (...)
-  - Added quotes/parens handling
-  - Verified proper noun compatibility
-  - Created 17 test cases (all passing)
-  - Commit: `f4c1819`
+| Phase | Plans | Total | Avg/Plan |
+|-------|-------|-------|----------|
+| 1 | 5/5 | 21 min | 4.2 min |
+| 2 | 5/5 | 22 min | 4.4 min |
+| 3 | 6/6 | 38 min | 6.3 min |
+| 4 | 0/5 | - | - |
 
----
+**Recent Trend:**
+- Last 5 plans: 8 min, 10 min, 8 min, 8 min, 4 min (adaptive processing)
+- Trend: Stable (Phase 3 had more complex integrations)
 
-## Completed Plans
+*Updated after each plan completion*
 
-### Phase 1: Setup & Base Processing
-- ✅ 01-01: Project initialization
-- ✅ 01-02: Base text processor
+## Accumulated Context
 
-### Phase 2: Noise Reduction & VAD
-- ✅ 02-01: Audio preprocessing
-- ✅ 02-02: VAD implementation
-- ✅ 02-03: Noise reduction
-- ✅ 02-04: Integration testing
-- ✅ 02-05: Performance optimization
+### Decisions
 
-### Phase 3: Text Processing
-- ✅ 03-01: Base error corrections
-- ✅ 03-02: Phonetic corrections (voiced/unvoiced)
-- ✅ 03-03: Morphological corrections (gender, case)
-- ✅ 03-04: Proper noun capitalization
-- ✅ 03-05: **Capitalization after punctuation** (JUST COMPLETED)
+Decisions are logged in PROJECT.md Key Decisions table.
+Recent decisions affecting current work:
 
----
+- [Phase 1 Complete]: All 16 Phase 1 requirements verified
+- [Phase 2 Complete]: All 9 Phase 2 requirements verified
+- [03-01]: EnhancedTextProcessor expanded to 251 rules (198 dict + 53 pattern)
+- [03-02]: Phonetic corrections with 6 consonant pairs (б↔п, в↔ф, г↔к, д↔т, ж↔ш, з↔с)
+- [03-03]: Morphological corrections via pymorphy2 (gender agreement, case endings)
+- [03-04]: Proper noun dictionary with 557 entries (205 cities + 233 names + 119 countries)
+- [03-05]: Improved capitalization with multi-punctuation, ellipsis, quotes/parens support
+- [03-06]: Backend-aware adaptive processing (Whisper skips punctuation, Sherpa applies it)
 
-## Current Focus
+### Pending Todos
 
-**Phase 3: Text Processing** (40% complete)
+None yet.
 
-**Remaining plans:**
-- 03-06: Punctuation restoration (ML model)
-- 03-07: Final text cleanup
-- 03-08: Integration testing
+### Blockers/Concerns
 
----
+**Phase 1 Status:**
+- ✅ COMPLETE - All 16 requirements verified
 
-## Accumulated Decisions
+**Phase 2 Status:**
+- ✅ COMPLETE - All 9 requirements verified
 
-### Text Processing (Phase 3)
+**Phase 3 Status:**
+- ✅ COMPLETE - All 7 requirements verified
+- ✅ 251 correction rules implemented (251% of target)
+- ✅ Phonetic corrections with 6 consonant pairs
+- ✅ Morphological corrections (pymorphy2)
+- ✅ Proper noun dictionary (779 entries with variants)
+- ✅ Improved capitalization (17 test cases passing)
+- ✅ Backend-aware adaptive processing
+- 📊 Expected: 10-20% CER improvement from text processing
 
-**1. Processing Pipeline Order (03-01 to 03-05)**
-- Order matters: Corrections → Phonetics → Morphology → Punctuation → Capitalization → Proper Nouns
-- Proper nouns applied LAST to avoid interference
-- Capitalization before proper nouns to establish sentence structure
-
-**2. Capitalization Logic (03-05)**
-- First letter ALWAYS capitalized
-- Sentence endings: `. ! ?` → capitalize next word
-- Multiple punctuation: `!! ?? !?` → capitalize next word
-- Ellipsis `...` → treat as sentence ending
-- Quotes/parens after punctuation → preserve and capitalize
-- Multiple spaces → normalize to single space
-- Already-capitalized words → preserve (don't lowercase)
-
-**3. Proper Noun Integration (03-04)**
-- Proper nouns use JSON dictionaries (cities, names, countries)
-- Applied AFTER capitalization (no conflicts)
-- Only capitalizes known entities (no over-capitalization)
-
-**4. Phonetic Corrections (03-02)**
-- Handle voiced/unvoiced consonant confusion
-- Validate corrections against dictionary
-- Language-specific rules (Russian focus)
-
-**5. Morphological Corrections (03-03)**
-- Gender agreement fixes
-- Case ending corrections
-- Uses pymorphy2 for analysis
-
----
-
-## Known Blockers
-
-### None
-All dependencies resolved. Ready to proceed to 03-06.
-
----
-
-## Technical Debt
-
-### Future Enhancements (Phase 4+)
-
-**1. Abbreviation Handling**
-- Add common abbreviations (т.е., напр., др., и т.д.)
-- Don't capitalize after abbreviations
-- Context-aware detection
-
-**2. Context-Sensitive Capitalization**
-- Use NLP models for sentence boundary detection
-- Handle complex sentence structures
-- Better quote/paren handling
-
-**3. Performance Optimization**
-- Pre-compile all regex patterns (done for base corrections)
-- Cache punctuation model (lazy loading implemented)
-- Batch processing for multiple texts
-
----
+**Phase 4 Concerns:**
+- UI integration requires PyQt6 knowledge
+- Quality profiles need backend parameter coordination
+- User-defined dictionary needs persistence (JSON/config)
 
 ## Session Continuity
 
-**Last session:** 2025-01-29
-**Stopped at:** Completed 03-05-PLAN.md
-**Resume file:** None (plan completed successfully)
-
-**Next action:** Execute 03-06 (Punctuation restoration)
+Last session: 2026-01-29 22:00 UTC
+Stopped at: Phase 3 complete - verification passed
+Resume file: None
 
 ---
 
-## Commit History
+**Next Step:** Begin Phase 4 (Advanced Features) - quality profiles, UI settings, model selection
 
-**Recent commits (last 5):**
-- `f4c1819` feat(03-05): improve capitalization after punctuation
-- `762699d` feat(04-05): create DocumentGenerator React component
-- `fe46d75f` feat(04-05): add document generation API functions to api.ts
-- `6116b720` docs(04-04): complete document API endpoints plan
-- `745e6f3c` fix(04-04): fix document API encoding and schema issues
-
-**Total commits:** 59 (as of 2025-01-29)
-
----
-
-## Git Status
-
-**Current branch:** master
-**Origin status:** Ahead by 54 commits
-**Uncommitted changes:**
-- Modified: `.planning/REQUIREMENTS.md`
-- Modified: `.planning/ROADMAP.md`
-- Modified: `.planning/phases/03-text-processing/03-06-PLAN.md`
-- Untracked: `.planning/phases/02-noise-reduction-vad/02-05-SUMMARY.md`
-
-**Staged for commit:** None
-
----
-
-## Quality Metrics
-
-**Test coverage:**
-- Unit tests: 17 test cases for capitalization (100% passing)
-- Integration tests: Pending (03-08)
-- Edge cases covered: 10+ scenarios
-
-**Code quality:**
-- Type hints: Partial (improvement needed)
-- Docstrings: Complete for all public methods
-- PEP8 compliance: Good
-
----
-
-## Notes
-
-**For next session:**
-1. Execute 03-06 (Punctuation restoration with ML model)
-2. Focus on `deepmultilingualpunctuation` integration
-3. Add fallback for when ML model unavailable
-4. Test with real ASR output
-
-**Accumulated context:**
-- Processing order is critical
-- Proper nouns must run AFTER capitalization
-- Test coverage prevents regressions
-- Regex patterns need careful ordering
+**Or:** Run A/B test to validate all improvements: `python tests/test_backend_quality.py`
