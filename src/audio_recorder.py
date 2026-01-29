@@ -122,13 +122,13 @@ class AudioRecorder:
             pass  # Drop frame if queue is full
 
         # Calculate audio level for visualization (use cleaned audio)
-        # Use _recording flag instead of _shutting_down for more reliable callback
-        if self.on_level_update and self._recording:
-            try:
-                level = np.abs(data).mean()
-                self.on_level_update(float(level))
-            except Exception:
-                pass  # Ignore errors in callback
+        # VAD level bar removed - callback disabled
+        # if self.on_level_update:
+        #     try:
+        #         level = np.abs(data).mean()
+        #         self.on_level_update(float(level))
+        #     except Exception as e:
+        #         print(f"[VAD ERROR] Callback failed: {e}")
 
     def start(self) -> bool:
         """Start recording audio."""

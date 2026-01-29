@@ -11,15 +11,15 @@ from pathlib import Path
 from typing import Callable, Optional, Tuple
 import numpy as np
 
-from .text_processor import AdvancedTextProcessor
+from text_processor import AdvancedTextProcessor
 
 # Try to import enhanced text processor with punctuation
 try:
-    from .text_processor_enhanced import EnhancedTextProcessor
+    from text_processor_enhanced import EnhancedTextProcessor
     ENHANCED_PROCESSOR_AVAILABLE = True
 except ImportError:
     ENHANCED_PROCESSOR_AVAILABLE = False
-from .backends import get_backend, BaseBackend
+from backends import get_backend, BaseBackend
 
 
 class Transcriber:
@@ -39,6 +39,8 @@ class Transcriber:
         vad_threshold: float = 0.5,
         min_silence_duration_ms: int = 800,
         min_speech_duration_ms: int = 500,
+        # User dictionary
+        user_dictionary: list = None,
     ):
         """
         Initialize transcriber with specified backend.
@@ -55,6 +57,7 @@ class Transcriber:
             vad_threshold: VAD probability threshold (0.0-1.0)
             min_silence_duration_ms: Min silence duration for VAD (ms)
             min_speech_duration_ms: Min speech duration for VAD (ms)
+            user_dictionary: User-defined correction entries
         """
         self.backend_name = backend
         self.model_size = model_size
@@ -69,6 +72,9 @@ class Transcriber:
         self.min_silence_duration_ms = min_silence_duration_ms
         self.min_speech_duration_ms = min_speech_duration_ms
 
+        # User dictionary for custom corrections
+        self.user_dictionary = user_dictionary or []
+
         self._backend = None
         self._lock = threading.Lock()
 
@@ -81,7 +87,8 @@ class Transcriber:
             self.text_processor = EnhancedTextProcessor(
                 language=lang_code,
                 enable_corrections=enable_post_processing,
-                enable_punctuation=True  # Enable punctuation restoration
+                enable_punctuation=True,  # Enable punctuation restoration
+                user_dictionary=self.user_dictionary,
             )
         else:
             self.text_processor = AdvancedTextProcessor(
@@ -150,7 +157,8 @@ class Transcriber:
                 self.text_processor = EnhancedTextProcessor(
                     language=lang_code,
                     enable_corrections=self._enable_post_processing,
-                    enable_punctuation=True
+                    enable_punctuation=True,
+                    user_dictionary=self.user_dictionary,
                 )
             else:
                 self.text_processor = AdvancedTextProcessor(
@@ -254,6 +262,20 @@ class Transcriber:
         self._enable_post_processing = value
         if self.text_processor:
             self.text_processor.enable_corrections = value
+
+    def set_user_dictionary(self, user_dictionary: list):
+        """Update user dictionary for custom corrections.
+
+        Args:
+            user_dictionary: List of {"wrong": str, "correct": str, "case_sensitive": bool} entries
+        """
+        self.user_dictionary = user_dictionary or []
+        if self.text_processor and hasattr(self.text_processor, 'set_user_dictionary'):
+            self.text_processor.set_user_dictionary(self.user_dictionary)
+
+    def get_user_dictionary(self) -> list:
+        """Get current user dictionary."""
+        return self.user_dictionary
 
     # Private field declaration
     _enable_post_processing: bool = True
