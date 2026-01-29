@@ -9,11 +9,20 @@ except ImportError:
     PUNCTUATION_AVAILABLE = False
     print("[WARNING] deepmultilingualpunctuation not installed. Install with: pip install deepmultilingualpunctuation")
 
+# Import phonetic corrections
+try:
+    from .phonetics import PhoneticCorrector
+    PHONETICS_AVAILABLE = True
+except ImportError:
+    PHONETICS_AVAILABLE = False
+    PhoneticCorrector = None
+    print("[WARNING] phonetics module not available")
+
 
 class EnhancedTextProcessor:
     """Enhanced text processor with punctuation restoration and Sherpa-specific corrections."""
 
-    def __init__(self, language: str = "ru", enable_corrections: bool = True, enable_punctuation: bool = True):
+    def __init__(self, language: str = "ru", enable_corrections: bool = True, enable_punctuation: bool = True, enable_phonetics: bool = True):
         """
         Initialize enhanced text processor.
 
@@ -21,10 +30,12 @@ class EnhancedTextProcessor:
             language: Target language code (ru, en, etc.)
             enable_corrections: Whether to enable error corrections
             enable_punctuation: Whether to restore punctuation
+            enable_phonetics: Whether to enable phonetic corrections (voiced/unvoiced)
         """
         self.language = language
         self.enable_corrections = enable_corrections
         self.enable_punctuation = enable_punctuation
+        self.enable_phonetics = enable_phonetics and PHONETICS_AVAILABLE
 
         self._load_corrections()
 
@@ -33,6 +44,12 @@ class EnhancedTextProcessor:
 
         # Punctuation model will be loaded lazily on first use
         self.punctuation_model = None
+
+        # Initialize phonetic corrector
+        if self.enable_phonetics:
+            self.phonetic_corrector = PhoneticCorrector(enable_validation=True)
+        else:
+            self.phonetic_corrector = None
 
     def _load_corrections(self):
         """Load error correction rules for the target language."""
@@ -196,17 +213,21 @@ class EnhancedTextProcessor:
         # Step 1: Fix common errors
         text = self._fix_errors(text)
 
-        # Step 2: Add punctuation (for CTC models like Sherpa)
+        # Step 2: Phonetic corrections (voiced/unvoiced consonants)
+        if self.enable_phonetics and self.phonetic_corrector:
+            text = self.phonetic_corrector.process(text)
+
+        # Step 3: Add punctuation (for CTC models like Sherpa)
         if self.enable_punctuation and self.punctuation_model:
             text = self._add_punctuation(text)
 
-        # Step 3: Fix punctuation placement
+        # Step 4: Fix punctuation placement
         text = self._fix_punctuation(text)
 
-        # Step 4: Fix capitalization
+        # Step 5: Fix capitalization
         text = self._fix_capitalization(text)
 
-        # Step 5: Final cleanup
+        # Step 6: Final cleanup
         text = self._cleanup(text)
 
         return text
