@@ -759,7 +759,7 @@ class SettingsDialog(QDialog):
             quality_layout.addWidget(btn)
 
         # Set current profile
-        current_profile = self.config.quality_profile if self.config else "balanced"
+        current_profile = self.config.quality_profile if self.config else "quality"
         if current_profile in self.quality_profile_buttons:
             self.quality_profile_buttons[current_profile].setChecked(True)
 
@@ -1403,19 +1403,8 @@ class MainWindow(QMainWindow):
         self.record_btn.move((COMPACT_WIDTH - 36) // 2, (COMPACT_HEIGHT - 36) // 2)
         self.record_btn.clicked.connect(self._toggle_recording)
 
-        # VAD level bar for speech detection visualization
-        self.vad_level_bar = QProgressBar(self.central)
-        self.vad_level_bar.setRange(0, 100)  # 0-100%
-        self.vad_level_bar.setTextVisible(False)
-        self.vad_level_bar.setFixedHeight(4)  # Thin bar
-        self.vad_level_bar.setFixedWidth(200)
-        self.vad_level_bar.move((COMPACT_WIDTH - 200) // 2, (COMPACT_HEIGHT - 36) // 2 + 40)  # Below record button
-
-        # Initial style: Gray (silence)
-        self.vad_level_bar.setStyleSheet("""
-            QProgressBar { border: none; background-color: #1a2840; }
-            QProgressBar::chunk { background-color: #6b7280; }
-        """)
+        # VAD level bar removed - caused issues and not needed
+        self.vad_level_bar = None
 
         # Corner buttons (top-right, small)
         btn_y = 6
@@ -1601,31 +1590,22 @@ class MainWindow(QMainWindow):
             level: Audio level from 0.0 (silence) to 1.0 (loud speech)
         """
         try:
+            # DEBUG: Print to console to verify callback is working
+            # print(f"[MAIN WINDOW] VAD level update: {level:.6f}")
+
             # Проверяем что окно ещё существует и не закрывается
             if not self._shutting_down and not sip.isdeleted(self):
                 # Convert level to percentage with higher gain for better sensitivity
                 # Audio levels are typically very small (0.001-0.1), so we amplify
                 percentage = min(100, int(level * 10000))
 
-                # Update the level bar
-                self.vad_level_bar.setValue(percentage)
+                # Update the level bar (if exists)
+                if self.vad_level_bar:
+                    self.vad_level_bar.setValue(percentage)
 
-                # Change color based on speech detection
-                # Threshold: >1% considered speech (very sensitive)
-                if percentage > 1:
-                    # Speech detected - Blue
-                    self.vad_level_bar.setStyleSheet("""
-                        QProgressBar { border: none; background-color: #1a2840; }
-                        QProgressBar::chunk { background-color: #3b82f6; }
-                    """)
-                else:
-                    # Silence - Gray
-                    self.vad_level_bar.setStyleSheet("""
-                        QProgressBar { border: none; background-color: #1a2840; }
-                        QProgressBar::chunk { background-color: #6b7280; }
-                    """)
-        except (RuntimeError, AttributeError):
-            pass  # Widget destroyed or shutting down
+                # VAD level bar removed - no color changes needed
+        except (RuntimeError, AttributeError) as e:
+            print(f"[VAD UI ERROR] {e}")  # DEBUG
 
     def _on_progress(self, msg):
         self.status_update.emit(msg)
@@ -1674,12 +1654,9 @@ class MainWindow(QMainWindow):
         with open("debug.log", "a", encoding="utf-8") as f:
             f.write(f"[DEBUG] _start() called, _recording={self._recording}, _processing={self._processing}\n")
 
-        # Reset VAD level bar to silence state
-        self.vad_level_bar.setValue(0)
-        self.vad_level_bar.setStyleSheet("""
-            QProgressBar { border: none; background-color: #1a2840; }
-            QProgressBar::chunk { background-color: #6b7280; }
-        """)
+        # Reset VAD level bar to silence state (if exists)
+        if self.vad_level_bar:
+            self.vad_level_bar.setValue(0)
 
         if self.recorder.start():
             self._recording = True
@@ -1764,12 +1741,9 @@ class MainWindow(QMainWindow):
         with open("debug.log", "a", encoding="utf-8") as f:
             f.write(f"[DEBUG] _cancel_recording() called\n")
 
-        # Reset VAD level bar to silence state
-        self.vad_level_bar.setValue(0)
-        self.vad_level_bar.setStyleSheet("""
-            QProgressBar { border: none; background-color: #1a2840; }
-            QProgressBar::chunk { background-color: #6b7280; }
-        """)
+        # Reset VAD level bar to silence state (if exists)
+        if self.vad_level_bar:
+            self.vad_level_bar.setValue(0)
 
         if not self._recording:
             return
@@ -1812,12 +1786,9 @@ class MainWindow(QMainWindow):
         with open("debug.log", "a", encoding="utf-8") as f:
             f.write(f"[DEBUG] _done() called, setting _processing=False, text_len={len(text)}, is_remote={is_remote}\n")
 
-        # Reset VAD level bar to silence state
-        self.vad_level_bar.setValue(0)
-        self.vad_level_bar.setStyleSheet("""
-            QProgressBar { border: none; background-color: #1a2840; }
-            QProgressBar::chunk { background-color: #6b7280; }
-        """)
+        # Reset VAD level bar to silence state (if exists)
+        if self.vad_level_bar:
+            self.vad_level_bar.setValue(0)
 
         # Check if we're shutting down
         if self._shutting_down:

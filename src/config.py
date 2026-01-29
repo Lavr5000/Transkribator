@@ -11,6 +11,12 @@ import platformdirs
 class Config:
     """Application configuration."""
 
+    # Quality profile (presets for Fast/Balanced/Quality)
+    quality_profile: str = "quality"  # fast, balanced, quality (default: quality for max accuracy)
+
+    # User-defined correction dictionary
+    user_dictionary: list = field(default_factory=list)  # [{"wrong": str, "correct": str, "case_sensitive": bool}]
+
     # Backend selection
     backend: str = "sherpa"  # whisper, sherpa (sherpa is ~30% faster for Russian)
 
@@ -89,6 +95,12 @@ class Config:
             try:
                 with open(config_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
+                # ALWAYS use "quality" as default (max quality)
+                # Also update backend and model to match quality profile
+                data["quality_profile"] = "quality"
+                quality_settings = QUALITY_PROFILES["quality"]
+                data["backend"] = quality_settings["backend"]
+                data["model_size"] = quality_settings["model_size"]
                 return cls(**data)
             except (json.JSONDecodeError, TypeError):
                 pass
@@ -107,6 +119,25 @@ class Config:
         # Assume typing speed of 40 WPM, calculate time saved
         typing_time = (words / 40) * 60  # seconds
         self.total_seconds_saved += max(0, typing_time - duration)
+        self.save()
+
+    def apply_quality_profile(self, profile: str) -> None:
+        """Apply quality profile preset to configuration.
+
+        Args:
+            profile: One of "fast", "balanced", "quality"
+        """
+        if profile not in QUALITY_PROFILES:
+            profile = "balanced"
+
+        settings = QUALITY_PROFILES[profile]
+        self.quality_profile = profile
+        self.backend = settings["backend"]
+        self.model_size = settings["model_size"]
+        self.vad_enabled = settings["vad_enabled"]
+        self.vad_threshold = settings["vad_threshold"]
+        self.min_silence_duration_ms = settings["min_silence_duration_ms"]
+        self.enable_post_processing = settings["enable_post_processing"]
         self.save()
 
 
@@ -185,4 +216,52 @@ MOUSE_BUTTONS = {
 PASTE_METHODS = {
     "clipboard": "Clipboard + Ctrl+Shift+V (рекомендуется)",
     "type": "Посимвольный ввод (может вызывать краши)",
+}
+
+# Quality profile presets
+QUALITY_PROFILES = {
+    "fast": {
+        "backend": "sherpa",
+        "model_size": "giga-am-v2-ru",
+        "vad_enabled": False,
+        "vad_threshold": 0.5,
+        "min_silence_duration_ms": 800,
+        "enable_post_processing": False,
+        "description": "⚡ Fast — Максимальная скорость",
+    },
+    "balanced": {
+        "backend": "sherpa",
+        "model_size": "giga-am-v2-ru",
+        "vad_enabled": True,
+        "vad_threshold": 0.5,
+        "min_silence_duration_ms": 800,
+        "enable_post_processing": True,
+        "description": "⚖️ Balanced — Баланс скорости и качества",
+    },
+    "quality": {
+        "backend": "whisper",
+        "model_size": "small",
+        "vad_enabled": True,
+        "vad_threshold": 0.3,
+        "min_silence_duration_ms": 500,
+        "enable_post_processing": True,
+        "description": "🎯 Quality — Максимальное качество",
+    },
+}
+
+# Model metadata for UI display (RAM usage, RTF, description)
+MODEL_METADATA = {
+    # Whisper models
+    "tiny": {"ram_mb": 1000, "rtf": 0.3, "description": "Макс. скорость"},
+    "base": {"ram_mb": 1000, "rtf": 0.5, "description": "Быстрый"},
+    "small": {"ram_mb": 2000, "rtf": 1.0, "description": "Баланс"},
+    "medium": {"ram_mb": 5000, "rtf": 2.0, "description": "Точный"},
+    "large": {"ram_mb": 10000, "rtf": 3.0, "description": "Очень точный"},
+    "large-v3": {"ram_mb": 10000, "rtf": 3.5, "description": "Последний (v3)"},
+    "large-v3-turbo": {"ram_mb": 10000, "rtf": 3.0, "description": "Макс. точность"},
+    # Sherpa models
+    "giga-am-v2-ru": {"ram_mb": 140, "rtf": 0.1, "description": "Русский (2025)"},
+    "giga-am-ru": {"ram_mb": 140, "rtf": 0.1, "description": "Русский (2024)"},
+    # Podlodka model
+    "podlodka-turbo": {"ram_mb": 1000, "rtf": 0.4, "description": "Ru fine-tuned"},
 }

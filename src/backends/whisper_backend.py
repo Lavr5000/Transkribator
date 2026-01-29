@@ -10,10 +10,10 @@ from .base import BaseBackend
 
 # Import enhanced text processor
 try:
-    from ..text_processor_enhanced import EnhancedTextProcessor
+    from src.text_processor_enhanced import EnhancedTextProcessor
     ENHANCED_PROCESSOR_AVAILABLE = True
 except ImportError:
-    from ..text_processor import AdvancedTextProcessor
+    from src.text_processor import AdvancedTextProcessor
     ENHANCED_PROCESSOR_AVAILABLE = False
 
 # Try faster-whisper first, fallback to openai-whisper

@@ -117,14 +117,16 @@ Plans:
 4. Noise reduction настройки доступны в UI (enable/disable, intensity)
 5. Выбор модели доступен в UI (tiny/base/small/medium/large-v3-turbo)
 
-**Plans**: TBD (will be determined during planning)
+**Plans**: 5 plans in 2 waves
 
 Plans:
-- [ ] 04-01: Implement quality profiles (Fast/Balanced/Quality)
-- [ ] 04-02: Add user-defined correction dictionary
-- [ ] 04-03: Add VAD settings to UI
-- [ ] 04-04: Add noise reduction settings to UI
-- [ ] 04-05: Add model selection to UI
+- [x] 04-01 — Implement quality profiles (Fast/Balanced/Quality) ✅
+- [x] 04-02 — Add user-defined correction dictionary ✅
+- [x] 04-03 — Add VAD settings to UI ✅
+- [x] 04-04 — Add noise reduction settings to UI ✅
+- [x] 04-05 — Add enhanced model selection with metadata ✅
+
+**Status**: COMPLETE (2026-01-29) — All 5 requirements verified PASSED
 
 ## Progress
 
@@ -136,6 +138,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | 1. Critical Bug Fixes | 5/5 | ✅ Complete | 2026-01-27 |
 | 2. Noise Reduction + VAD | 5/5 | ✅ Complete | 2026-01-27 |
 | 3. Text Processing Enhancement | 6/6 | ✅ Complete | 2026-01-29 |
-| 4. Advanced Features | 0/5 | Not started | - |
+| 4. Advanced Features | 5/5 | ✅ Complete | 2026-01-29 |
 
-**Total Progress:** [██████████] 75% (16/21 plans executed, Phases 1-3 complete)
+**Total Progress:** [██████████] 100% (21/21 plans executed, All phases complete!)

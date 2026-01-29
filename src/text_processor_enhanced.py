@@ -11,7 +11,7 @@ except ImportError:
 
 # Import phonetic corrections
 try:
-    from .phonetics import PhoneticCorrector
+    from phonetics import PhoneticCorrector
     PHONETICS_AVAILABLE = True
 except ImportError:
     PHONETICS_AVAILABLE = False
@@ -20,7 +20,7 @@ except ImportError:
 
 # Import morphological corrections
 try:
-    from .morphology import MorphologyCorrector
+    from morphology import MorphologyCorrector
     MORPHOLOGY_AVAILABLE = True
 except ImportError:
     MORPHOLOGY_AVAILABLE = False
@@ -29,7 +29,7 @@ except ImportError:
 
 # Import proper noun corrections
 try:
-    from .proper_nouns import ProperNounDict
+    from proper_nouns import ProperNounDict
     PROPER_NOUNS_AVAILABLE = True
 except ImportError:
     PROPER_NOUNS_AVAILABLE = False
@@ -40,7 +40,7 @@ except ImportError:
 class EnhancedTextProcessor:
     """Enhanced text processor with punctuation restoration and Sherpa-specific corrections."""
 
-    def __init__(self, language: str = "ru", enable_corrections: bool = True, enable_punctuation: bool = True, enable_phonetics: bool = True, enable_morphology: bool = True, enable_proper_nouns: bool = True, backend: str = "sherpa"):
+    def __init__(self, language: str = "ru", enable_corrections: bool = True, enable_punctuation: bool = True, enable_phonetics: bool = True, enable_morphology: bool = True, enable_proper_nouns: bool = True, backend: str = "sherpa", user_dictionary: list = None):
         """
         Initialize enhanced text processor.
 
@@ -52,10 +52,12 @@ class EnhancedTextProcessor:
             enable_morphology: Whether to enable morphological corrections (gender, case)
             enable_proper_nouns: Whether to enable proper noun capitalization
             backend: Backend type for adaptive processing ("whisper", "sherpa", "podlodkaturbo")
+            user_dictionary: User-defined correction entries [{"wrong": str, "correct": str, "case_sensitive": bool}]
         """
         self.language = language
         self.backend = backend.lower()
         self.enable_corrections = enable_corrections
+        self.user_dictionary = user_dictionary or []
 
         # Configure processing flags based on backend type
         self._configure_for_backend(enable_phonetics, enable_morphology, enable_proper_nouns)
@@ -543,11 +545,62 @@ class EnhancedTextProcessor:
         # Fix repeated letters
         text = self._fix_repeated_letters(text)
 
+        # Apply user dictionary corrections FIRST (highest priority)
+        text = self._apply_user_dictionary(text)
+
         # Apply pre-compiled corrections (already sorted by length)
         for pattern, correct in self._compiled_patterns:
             text = pattern.sub(correct, text)
 
         return text
+
+    def _apply_user_dictionary(self, text: str) -> str:
+        """Apply user-defined correction entries.
+
+        User dictionary is applied before built-in corrections,
+        giving it higher priority.
+
+        Args:
+            text: Text to correct
+
+        Returns:
+            Text with user corrections applied
+        """
+        if not self.user_dictionary:
+            return text
+
+        for entry in self.user_dictionary:
+            wrong = entry.get("wrong", "")
+            correct = entry.get("correct", "")
+            case_sensitive = entry.get("case_sensitive", False)
+
+            if not wrong or not correct:
+                continue
+
+            if case_sensitive:
+                # Case-sensitive exact replacement
+                text = text.replace(wrong, correct)
+            else:
+                # Case-insensitive replacement
+                # Use word boundaries for single words, no boundaries for phrases
+                if " " in wrong:
+                    # Phrase replacement - no word boundaries
+                    pattern = re.compile(re.escape(wrong), re.IGNORECASE)
+                    text = pattern.sub(correct, text)
+                else:
+                    # Single word - use word boundaries
+                    pattern = re.compile(r'\b' + re.escape(wrong) + r'\b', re.IGNORECASE)
+                    text = pattern.sub(correct, text)
+
+        return text
+
+    def set_user_dictionary(self, user_dictionary: list):
+        """Update user dictionary entries.
+
+        Args:
+            user_dictionary: List of {"wrong": str, "correct": str, "case_sensitive": bool} entries
+        """
+        self.user_dictionary = user_dictionary or []
 
     def _fix_morphology(self, text: str) -> str:
         """Apply morphological corrections using pymorphy2.
