@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-01-27)
 
 ## Current Position
 
-Phase: 2 of 4 (Noise Reduction + VAD)
-Plan: 5 of 5 in current phase
-Status: Phase complete
-Last activity: 2026-01-27 — Completed Phase 2 verification
+Phase: 3 of 4 (Text Processing Enhancement)
+Plan: 2 of 6 in current phase
+Status: In progress
+Last activity: 2026-01-29 — Completed phonetic corrections implementation
 
-Progress: [████████████] 100%
+Progress: [███░░░░░░░░░░░░░░░░] 35% (2/6 plans in Phase 3, 12/20 total)
 
 ## Performance Metrics
 
@@ -29,7 +29,7 @@ Progress: [████████████] 100%
 |-------|-------|-------|----------|
 | 1 | 5/5 | 21 min | 4.2 min |
 | 2 | 5/5 | 22 min | 4.4 min |
-| 3 | 0/6 | - | - |
+| 3 | 2/6 | 10 min | 5.0 min |
 | 4 | 0/5 | - | - |
 
 **Recent Trend:**
@@ -60,6 +60,11 @@ Recent decisions affecting current work:
 - [02-05]: VAD level bar visualization added to MainWindow
 - [02-05]: Sensitivity adjusted to 10x gain amplifier for better visual feedback
 - [02-05]: Threshold lowered to 5% for speech detection
+- [03-01]: EnhancedTextProcessor created with punctuation restoration (deepmultilingualpunctuation)
+- [03-01]: Sherpa-specific error corrections added (лыбки→улыбки, неверо→небе, etc.)
+- [03-02]: PhoneticCorrector class implemented with 6 voiced/unvoiced consonant pairs
+- [03-02]: Word-end devoicing and pre-voiced assimilation corrections with vocabulary validation
+- [03-02]: Integrated phonetic corrections into EnhancedTextProcessor pipeline (step 2)
 
 ### Pending Todos
 
@@ -78,18 +83,25 @@ None yet.
 - ✅ VAD visualization in UI (level bar with color change)
 - 📊 Expected: 5-15% WER improvement from noise reduction + VAD
 
+**Phase 3 Status:**
+- ✅ COMPLETE (2/6) - EnhancedTextProcessor + Phonetic corrections
+- ✅ Enhanced text processor with ML punctuation restoration
+- ✅ Phonetic corrections for 6 consonant pairs (б↔п, в↔ф, г↔к, д↔т, ж↔ш, з↔с)
+- ✅ Vocabulary validation via pymorphy2 (optional)
+- 📊 Expected: 3-5% CER improvement from phonetic corrections
+
 **Phase 3 Concerns:**
 - Сбор реальных error patterns — нужен анализ типичных ошибок русской речи
 - Словарь имен собственных — требуется 1000-5000 entries
 
 ## Session Continuity
 
-Last session: 2026-01-27 19:15 UTC
-Stopped at: Phase 2 complete - verification passed
+Last session: 2026-01-29 10:30 UTC
+Stopped at: Completed 03-02 (phonetic corrections)
 Resume file: None
 
 ---
 
-**Next Step:** Begin Phase 3 (Text Processing Enhancement) - expand post-processing rules for Russian language
+**Next Step:** Continue Phase 3 (Plan 03-03) - Implement custom dictionary/vocabulary support
 
-**Or:** Run A/B test to validate Phase 1+2 improvements: `python tests/test_backend_quality.py`
+**Or:** Run A/B test to validate Phase 1+2+3 improvements: `python tests/test_backend_quality.py`
