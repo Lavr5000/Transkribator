@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-01-27)
 
 ## Current Position
 
-Phase: 3 of 4 (Text Processing Enhancement)
-Plan: 2 of 6 in current phase
+Phase: 3 of 6 (Text Processing Enhancement)
+Plan: 1 of 6 in current phase
 Status: In progress
-Last activity: 2026-01-29 — Completed phonetic corrections implementation
+Last activity: 2026-01-29 — Completed correction rules expansion (03-01)
 
-Progress: [███░░░░░░░░░░░░░░░░] 35% (2/6 plans in Phase 3, 12/20 total)
+Progress: [████░░░░░░░░░░░░░░] 40% (1/6 plans in Phase 3, 11/28 total)
 
 ## Performance Metrics
 
@@ -84,24 +84,25 @@ None yet.
 - 📊 Expected: 5-15% WER improvement from noise reduction + VAD
 
 **Phase 3 Status:**
-- ✅ COMPLETE (2/6) - EnhancedTextProcessor + Phonetic corrections
-- ✅ Enhanced text processor with ML punctuation restoration
-- ✅ Phonetic corrections for 6 consonant pairs (б↔п, в↔ф, г↔к, д↔т, ж↔ш, з↔с)
-- ✅ Vocabulary validation via pymorphy2 (optional)
-- 📊 Expected: 3-5% CER improvement from phonetic corrections
+- ✅ COMPLETE (1/6) - EnhancedTextProcessor with 251 correction rules
+- ✅ Expanded from 53 to 251 total rules (198 dict + 53 pattern)
+- ✅ 12 new rule categories: dropped letters, prepositions, verbs, gender, pronouns, numbers, conjunctions, particles, negations, question words
+- ✅ All existing rules preserved (100% regression test pass)
+- 📊 Expected: 5-10% CER improvement from expanded corrections
 
 **Phase 3 Concerns:**
+- Context-dependent gender corrections — requires morphological analysis (Phase 03-03)
 - Сбор реальных error patterns — нужен анализ типичных ошибок русской речи
 - Словарь имен собственных — требуется 1000-5000 entries
 
 ## Session Continuity
 
-Last session: 2026-01-29 10:30 UTC
-Stopped at: Completed 03-02 (phonetic corrections)
+Last session: 2026-01-29 12:00 UTC
+Stopped at: Completed 03-01 (correction rules expansion)
 Resume file: None
 
 ---
 
-**Next Step:** Continue Phase 3 (Plan 03-03) - Implement custom dictionary/vocabulary support
+**Next Step:** Continue Phase 3 (Plan 03-02) - Implement phonetic corrections (voiced/unvoiced consonants)
 
 **Or:** Run A/B test to validate Phase 1+2+3 improvements: `python tests/test_backend_quality.py`
