@@ -92,3 +92,22 @@ class BaseBackend(ABC):
             True if model is loaded, False otherwise
         """
         raise NotImplementedError("Subclasses must implement is_model_loaded()")
+
+    @property
+    def backend_name(self) -> str:
+        """Return backend identifier for text processor configuration.
+
+        The backend name is derived from the class name by removing 'Backend' suffix.
+        Examples:
+            WhisperBackend -> "whisper"
+            SherpaBackend -> "sherpa"
+            PodlodkaTurboBackend -> "podlodkaturbo"
+
+        Returns:
+            Backend name in lowercase for text processor configuration
+        """
+        class_name = self.__class__.__name__
+        # Remove 'Backend' suffix if present
+        if class_name.endswith('Backend'):
+            class_name = class_name[:-8]  # Remove 'Backend'
+        return class_name.lower()
