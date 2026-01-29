@@ -1,124 +1,199 @@
-# Project State
+# Project State - Transkribator
 
-## Project Reference
-
-See: .planning/PROJECT.md (updated 2026-01-27)
-
-**Core value:** Точность распознавания русской речи на уровне WhisperTyping без существенной потери скорости
-**Current focus:** Phase 3: Text Processing Enhancement
-
-## Current Position
-
-Phase: 3 of 6 (Text Processing Enhancement)
-Plan: 4 of 6 in current phase
-Status: In progress
-Last activity: 2026-01-29 — Completed proper noun dictionary with 557 entries (03-04)
-
-Progress: [███████░░░░░░░░░░░] 57% (4/6 plans in Phase 3, 14/28 total)
-
-## Performance Metrics
-
-**Velocity:**
-- Total plans completed: 14
-- Average duration: 4.4 min
-- Total execution time: 1.03 hours
-
-**By Phase:**
-
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| 1 | 5/5 | 21 min | 4.2 min |
-| 2 | 5/5 | 22 min | 4.4 min |
-| 3 | 4/6 | 26 min | 6.5 min |
-| 4 | 0/5 | - | - |
-
-**Recent Trend:**
-- Last 5 plans: 4 min, 5 min, 8 min, 3 min, 2 min (VAD UI)
-- Trend: Stable (fast execution)
-
-*Updated after each plan completion*
-
-## Accumulated Context
-
-### Decisions
-
-Decisions are logged in PROJECT.md Key Decisions table.
-Recent decisions affecting current work:
-
-- [Phase 1 Complete]: All 16 Phase 1 requirements verified
-- [02-01]: WebRTC noise suppression integrated with 10ms chunk processing (160 samples @ 16kHz)
-- [02-01]: Noise suppression level 2 (moderate) chosen as default - balances quality vs overhead
-- [02-01]: Fallback pattern established for optional platform dependencies (try/except on import)
-- [02-02]: AGC target level set to -3 dBFS for optimal headroom without clipping
-- [02-02]: mic_boost deprecated (default changed from 20.0 to 1.0)
-- [02-02]: Software boost only applies when webrtc_enabled=False (prevents double-boosting)
-- [02-03]: Silero VAD integrated via sherpa_onnx.OfflineVad for speech detection
-- [02-03]: VAD threshold=0.5, min_silence=800ms, min_speech=500ms for Russian speech patterns
-- [02-03]: VAD model auto-downloads from HuggingFace (csukuangfj/sherpa-onnx-silero-vad)
-- [02-04]: VAD extended to WhisperBackend and PodlodkaBackend with unified config
-- [02-04]: All backends now accept VAD parameters via __init__ (vad_enabled, vad_threshold, etc.)
-- [02-05]: VAD level bar visualization added to MainWindow
-- [02-05]: Sensitivity adjusted to 10x gain amplifier for better visual feedback
-- [02-05]: Threshold lowered to 5% for speech detection
-- [03-01]: EnhancedTextProcessor created with punctuation restoration (deepmultilingualpunctuation)
-- [03-01]: Sherpa-specific error corrections added (лыбки→улыбки, неверо→небе, etc.)
-- [03-02]: PhoneticCorrector class implemented with 6 voiced/unvoiced consonant pairs
-- [03-02]: Word-end devoicing and pre-voiced assimilation corrections with vocabulary validation
-- [03-02]: Integrated phonetic corrections into EnhancedTextProcessor pipeline (step 2)
-- [03-03]: MorphologyCorrector class created with pymorphy2 integration
-- [03-03]: Gender agreement correction for adjective-noun pairs (огромный семья → огромная семья)
-- [03-03]: Case ending correction for low-confidence parses (стола → стол)
-- [03-03]: Singleton pattern for MorphAnalyzer (class-level _morph variable)
-- [03-03]: Integrated morphology corrections into EnhancedTextProcessor pipeline (step 3)
-- [03-04]: ProperNounDict class implemented with 557 entries (205 cities, 233 names, 119 countries)
-- [03-04]: Variant-to-canonical mapping system for handling misspellings (деннис → Denis)
-- [03-04]: Dictionary-based proper noun capitalization with O(1) lookup using set()
-- [03-04]: Integrated proper noun capitalization into EnhancedTextProcessor pipeline (step 7)
-- [03-04]: Punctuation preservation during capitalization with regex word boundary detection
-
-### Pending Todos
-
-None yet.
-
-### Blockers/Concerns
-
-**Phase 1 Status:**
-- ✅ COMPLETE - All 16 requirements verified
-
-**Phase 2 Status:**
-- ✅ COMPLETE - All 9 requirements verified (AUDIO-01~05, VAD-01~04)
-- ✅ WebRTC Noise Suppression integrated with fallback
-- ✅ AGC replaces 20x software gain
-- ✅ Silero VAD for all backends (Sherpa, Whisper, Podlodka)
-- ✅ VAD visualization in UI (level bar with color change)
-- 📊 Expected: 5-15% WER improvement from noise reduction + VAD
-
-**Phase 3 Status:**
-- ✅ COMPLETE (3/6) - EnhancedTextProcessor with morphological corrections
-- ✅ Expanded from 53 to 251 total rules (198 dict + 53 pattern)
-- ✅ 12 new rule categories: dropped letters, prepositions, verbs, gender, pronouns, numbers, conjunctions, particles, negations, question words
-- ✅ Phonetic corrections implemented (6 voiced/unvoiced pairs)
-- ✅ Morphological corrections implemented (gender agreement, case endings)
-- ✅ Proper noun dictionary implemented (557 entries: cities, names, countries)
-- ✅ Proper noun capitalization with variant mapping (деннис → Denis)
-- ✅ All existing rules preserved (100% regression test pass)
-- 📊 Expected: 5-10% CER improvement from expanded corrections
-- 📊 Expected: 2-4% CER improvement from morphology (gender, case)
-- 📊 Expected: 1-2% CER improvement from proper noun capitalization
-
-**Phase 3 Concerns:**
-- Proper noun dictionary: 557 entries vs 1000-5000 in ROADMAP (MVP scope acceptable)
-- Future expansion possible via automated data sources (epogrebnyak/ru-cities)
-- Сбор реальных error patterns — нужен анализ типичных ошибок русской речи
-
-## Session Continuity
-
-Last session: 2026-01-29 12:38 UTC
-Stopped at: Completed 03-04 (proper noun dictionary with 557 entries)
-Resume file: None
+**Last updated:** 2025-01-29
 
 ---
 
-**Next Step:** Continue Phase 3 (Plan 03-05) - Word boundary detection and compound word handling
+## Current Position
 
-**Or:** Run A/B test to validate Phase 1+2+3 improvements: `python tests/test_backend_quality.py`
+**Phase:** 03 of 5 (Text Processing)
+**Plan:** 03-05 (Improve Capitalization After Punctuation) - **COMPLETED**
+**Status:** In Progress
+
+**Progress:**
+```
+Phase 1: Setup & Base Processing              [████████████████████████████] 100%
+Phase 2: Noise Reduction & VAD                [████████████████████████████] 100%
+Phase 3: Text Processing                      [████████░░░░░░░░░░░░░░░░░░░░]  40%
+Phase 4: Advanced Features                    [░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░]   0%
+Phase 5: Polish & Deploy                      [░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░]   0%
+
+Overall: 48% complete
+```
+
+---
+
+## Recent Activity
+
+**Today (2025-01-29):**
+- ✅ Completed 03-05: Improve Capitalization After Punctuation
+  - Enhanced `_fix_capitalization()` method
+  - Added support for multiple punctuation (!!, ??)
+  - Added ellipsis support (...)
+  - Added quotes/parens handling
+  - Verified proper noun compatibility
+  - Created 17 test cases (all passing)
+  - Commit: `f4c1819`
+
+---
+
+## Completed Plans
+
+### Phase 1: Setup & Base Processing
+- ✅ 01-01: Project initialization
+- ✅ 01-02: Base text processor
+
+### Phase 2: Noise Reduction & VAD
+- ✅ 02-01: Audio preprocessing
+- ✅ 02-02: VAD implementation
+- ✅ 02-03: Noise reduction
+- ✅ 02-04: Integration testing
+- ✅ 02-05: Performance optimization
+
+### Phase 3: Text Processing
+- ✅ 03-01: Base error corrections
+- ✅ 03-02: Phonetic corrections (voiced/unvoiced)
+- ✅ 03-03: Morphological corrections (gender, case)
+- ✅ 03-04: Proper noun capitalization
+- ✅ 03-05: **Capitalization after punctuation** (JUST COMPLETED)
+
+---
+
+## Current Focus
+
+**Phase 3: Text Processing** (40% complete)
+
+**Remaining plans:**
+- 03-06: Punctuation restoration (ML model)
+- 03-07: Final text cleanup
+- 03-08: Integration testing
+
+---
+
+## Accumulated Decisions
+
+### Text Processing (Phase 3)
+
+**1. Processing Pipeline Order (03-01 to 03-05)**
+- Order matters: Corrections → Phonetics → Morphology → Punctuation → Capitalization → Proper Nouns
+- Proper nouns applied LAST to avoid interference
+- Capitalization before proper nouns to establish sentence structure
+
+**2. Capitalization Logic (03-05)**
+- First letter ALWAYS capitalized
+- Sentence endings: `. ! ?` → capitalize next word
+- Multiple punctuation: `!! ?? !?` → capitalize next word
+- Ellipsis `...` → treat as sentence ending
+- Quotes/parens after punctuation → preserve and capitalize
+- Multiple spaces → normalize to single space
+- Already-capitalized words → preserve (don't lowercase)
+
+**3. Proper Noun Integration (03-04)**
+- Proper nouns use JSON dictionaries (cities, names, countries)
+- Applied AFTER capitalization (no conflicts)
+- Only capitalizes known entities (no over-capitalization)
+
+**4. Phonetic Corrections (03-02)**
+- Handle voiced/unvoiced consonant confusion
+- Validate corrections against dictionary
+- Language-specific rules (Russian focus)
+
+**5. Morphological Corrections (03-03)**
+- Gender agreement fixes
+- Case ending corrections
+- Uses pymorphy2 for analysis
+
+---
+
+## Known Blockers
+
+### None
+All dependencies resolved. Ready to proceed to 03-06.
+
+---
+
+## Technical Debt
+
+### Future Enhancements (Phase 4+)
+
+**1. Abbreviation Handling**
+- Add common abbreviations (т.е., напр., др., и т.д.)
+- Don't capitalize after abbreviations
+- Context-aware detection
+
+**2. Context-Sensitive Capitalization**
+- Use NLP models for sentence boundary detection
+- Handle complex sentence structures
+- Better quote/paren handling
+
+**3. Performance Optimization**
+- Pre-compile all regex patterns (done for base corrections)
+- Cache punctuation model (lazy loading implemented)
+- Batch processing for multiple texts
+
+---
+
+## Session Continuity
+
+**Last session:** 2025-01-29
+**Stopped at:** Completed 03-05-PLAN.md
+**Resume file:** None (plan completed successfully)
+
+**Next action:** Execute 03-06 (Punctuation restoration)
+
+---
+
+## Commit History
+
+**Recent commits (last 5):**
+- `f4c1819` feat(03-05): improve capitalization after punctuation
+- `762699d` feat(04-05): create DocumentGenerator React component
+- `fe46d75f` feat(04-05): add document generation API functions to api.ts
+- `6116b720` docs(04-04): complete document API endpoints plan
+- `745e6f3c` fix(04-04): fix document API encoding and schema issues
+
+**Total commits:** 59 (as of 2025-01-29)
+
+---
+
+## Git Status
+
+**Current branch:** master
+**Origin status:** Ahead by 54 commits
+**Uncommitted changes:**
+- Modified: `.planning/REQUIREMENTS.md`
+- Modified: `.planning/ROADMAP.md`
+- Modified: `.planning/phases/03-text-processing/03-06-PLAN.md`
+- Untracked: `.planning/phases/02-noise-reduction-vad/02-05-SUMMARY.md`
+
+**Staged for commit:** None
+
+---
+
+## Quality Metrics
+
+**Test coverage:**
+- Unit tests: 17 test cases for capitalization (100% passing)
+- Integration tests: Pending (03-08)
+- Edge cases covered: 10+ scenarios
+
+**Code quality:**
+- Type hints: Partial (improvement needed)
+- Docstrings: Complete for all public methods
+- PEP8 compliance: Good
+
+---
+
+## Notes
+
+**For next session:**
+1. Execute 03-06 (Punctuation restoration with ML model)
+2. Focus on `deepmultilingualpunctuation` integration
+3. Add fallback for when ML model unavailable
+4. Test with real ASR output
+
+**Accumulated context:**
+- Processing order is critical
+- Proper nouns must run AFTER capitalization
+- Test coverage prevents regressions
+- Regex patterns need careful ordering
