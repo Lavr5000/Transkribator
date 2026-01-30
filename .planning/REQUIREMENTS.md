@@ -1,143 +1,84 @@
-# Requirements: Transkribator Audio Quality Improvement
+# Requirements: Transkribator v1.1 - Remote Server Optimization
 
-**Defined:** 2026-01-27
+**Defined:** 2026-01-30
 **Core Value:** Точность распознавания русской речи на уровне WhisperTyping без существенной потери скорости
 
-## v1 Requirements
+## Milestone v1.1 Requirements
 
-Требования для улучшения качества транскрибации до уровня WhisperTyping. Каждое требование отображается на фазу roadmap.
+Требования для оптимизации удалённого сервера транскрибации. Проблема: медленная работа, качество падает утром.
 
-### Model Optimization
+### SRV - Server Configuration
 
-- [x] **MODEL-01**: Whisper backend принудительно использует `language="ru"` вместо auto-detection ✅
-- [x] **MODEL-02**: Whisper backend использует `beam_size=5` (качество) или `beam_size=2` (баланс) вместо текущего `beam_size=1` ✅
-- [x] **MODEL-03**: Whisper backend использует `temperature=0.0` для детерминированной декодировки ✅
-- [x] **MODEL-04**: Whisper backend использует `no_speech_threshold=0.6` для предотвращения галлюцинаций на тишине ✅ (VAD filter enabled)
-- [x] **MODEL-05**: Sherpa backend исправлен с CTC на Transducer режим (`from_nemo_transducer`) ✅
-- [x] **MODEL-06**: Sherpa backend использует `max_active_paths=4` для оптимальной точности ✅
-- [x] **MODEL-07**: Sherpa backend использует правильные файлы модели (encoder.int8.onnx, decoder.onnx, joiner.onnx) ✅
-- [x] **MODEL-08**: VAD параметры оптимизированы для русского языка (min_speech_duration_ms=300, speech_pad_ms=400) ✅
+- [ ] **SRV-01**: TranscriberServer использует принудительный русский язык (`language="ru"` вместо `auto`)
+- [ ] **SRV-02**: TranscriberServer использует оптимизированный backend (`sherpa/giga-am-v2-ru` вместо `whisper/base`)
+- [ ] **SRV-03**: TranscriberServer включает VAD для удаления тишины (`vad_enabled=True`)
+- [ ] **SRV-04**: TranscriberServer использует параметры quality profile (vad_threshold=0.3, min_silence=500, min_speech=300)
+- [ ] **SRV-05**: TranscriberServer включает пост-обработку текста из Phase 3 (251 правило коррекции)
 
-### Audio Processing
+### AUDIO - Audio Encoding
 
-- [x] **AUDIO-01**: AudioRecorder интегрирован с WebRTC Noise/Gain для шумоподавления ✅
-- [x] **AUDIO-02**: Текущий 20x software gain заменён на адаптивный AGC от WebRTC ✅
-- [x] **AUDIO-03**: Шумоподавление применяется ДО VAD для лучшей точности детекции речи ✅
-- [x] **AUDIO-04**: WebRTC обработка работает в реальном времени (<10ms latency) ✅
-- [x] **AUDIO-05**: Fallback на software boost если WebRTC недоступен ✅
+- [ ] **AUDIO-01**: Клиент кодирует аудио в Opus формат перед отправкой (сжатие ~10x)
+- [ ] **AUDIO-02**: Сервер поддерживает декодирование Opus формата
+- [ ] **AUDIO-03**: Сохраняется поддержка WAV fallback для совместимости
+- [ ] **AUDIO-04**: Размер аудио файла для 30 сек записи < 100 KB (было ~960 KB)
 
-### Voice Activity Detection
+### CLIENT - Client Optimization
 
-- [x] **VAD-01**: Silero VAD интегрирован в SherpaBackend ✅
-- [x] **VAD-02**: VAD работает для всех бэкендов (Whisper, Sherpa, Podlodka) ✅
-- [x] **VAD-03**: VAD параметры настраиваемые через config (threshold, min_silence_duration_ms) ✅
-- [x] **VAD-04**: VAD визуализация в UI (индикатор записи речи) ✅
+- [ ] **CLIENT-01**: VAD включён на клиенте для отрезания тишины ДО отправки на сервер
+- [ ] **CLIENT-02**: Polling interval уменьшен с 2.0 сек до 0.5 сек (быстрее реакция)
+- [ ] **CLIENT-03**: Добавлено логирование времени для каждого этапа (upload, transcription, download)
+- [ ] **CLIENT-04**: Логи показывают размер файла и скорость передачи
 
-### Text Post-Processing
+### NET - Network & Stability
 
-- [x] **POST-01**: EnhancedTextProcessor расширен с 50 до 100+ правил коррекции ✅
-- [x] **POST-02**: Добавлены фонетические коррекции (б↔п, в↔ф, г↔к, д↔т, з↔с) ✅
-- [x] **POST-03**: Добавлены морфологические коррекции (род, падеж, спряжение) ✅
-- [x] **POST-04**: Словарь имен собственных (500-1000 entries: Москва, Denis, Россия, Сергей...) ✅
-- [x] **POST-05**: Капитализация после пунктуации улучшена ✅
-- [x] **POST-06**: Punctuation restoration работает для всех бэкендов ✅
-- [x] **POST-07**: Пост-обработка адаптивная для Whisper (есть пунктуация) vs Sherpa (нет пунктуации) ✅
+- [ ] **NET-01**: Сервер имеет автозапуск при старте системы
+- [ ] **NET-02**: Serveo туннель автоматически восстанавливается при обрыве
+- [ ] **NET-03**: Health check endpoint работает корректно
+- [ ] **NET-04**: Логи сервера доступны для диагностики проблем
+- [ ] **NET-05**: Fallback на локальную транскрибацию при недоступности сервера
 
-### Configuration & UX
+## Future Requirements
 
-- [ ] **CFG-01**: Quality profiles в настройках (Fast/Balanced/Quality)
-- [ ] **CFG-02**: Пользовательский словарь коррекций (добавление своих слов/терминов)
-- [ ] **CFG-03**: Настройки VAD доступны в UI
-- [ ] **CFG-04**: Настройки noise reduction доступны в UI
-- [ ] **CFG-05**: Выбор модели доступен в UI (tiny/base/small/medium/large-v3-turbo)
+Отложены на следующий milestone:
 
-### Testing & Validation
-
-- [x] **TEST-01**: A/B тестирование до/после улучшений на одном аудио ✅ (framework ready)
-- [x] **TEST-02**: Измерение WER (Word Error Rate) до/после ✅ (implemented)
-- [x] **TEST-03**: Измерение CER (Character Error Rate) до/после ✅ (implemented)
-- [x] **TEST-04**: Сравнение с WhisperTyping на том же аудио ✅ (framework supports)
-- [x] **TEST-05**: Измерение RTF (Real-Time Factor) для проверки скорости ✅ (implemented)
-
-### Server Synchronization
-
-- [x] **SRV-01**: Улучшения синхронизированы между клиентом и сервером ✅
-- [x] **SRV-02**: TranscriberServer использует те же параметры модели ✅
-- [x] **SRV-03**: RemoteClient корректно работает с улучшенным pipeline ✅
-
-## v2 Requirements
-
-Отложены до будущей версии. Отслеживаются, но не входят в текущий roadmap.
-
-### Advanced Features
-
-- **ADV-01**: Russian-fine-tuned Whisper model (опциональная загрузка)
-- **ADV-02**: LLM-based error correction (ручной триггер)
-- **ADV-03**: Morphological POS-tagger для русского языка
-- **ADV-04**: Whisper hallucination detection и фильтрация
+- **STREAM-01**: Streaming upload для параллельной записи и передачи
+- **WS-01**: WebSocket вместо polling для realtime статуса
+- **EDGE-01**: Edge-side обработка на сервере
 
 ## Out of Scope
 
-Явно исключено. Документировано для предотвращения scope creep.
-
 | Feature | Reason |
 |---------|--------|
-| RNNoise | Нет Python bindings, только C++ реализация |
-| Полный рефакторинг архитектуры | Только целевые улучшения качества |
-| Смена на только Whisper бэкенд | Sherpa быстрее для русского, нужен баланс |
-| Поддержка других языков | Только русский приоритет в v1 |
-| Изменение GUI дизайна | Улучшения только backend-логики |
-| Real-time VAD при записи | VAD только для транскрибации и визуализации |
+| Полный рефакторинг архитектуры | Только оптимизация существующего |
+| Изменение GUI | Только backend улучшения |
+| Поддержка других языков | Русский приоритет |
+| Новые модели | Оптимизация существующих |
 
 ## Traceability
 
-Какие фазы покрывают какие требования. Обновляется при создании roadmap.
-
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| MODEL-01 | Phase 1 | Pending |
-| MODEL-02 | Phase 1 | Pending |
-| MODEL-03 | Phase 1 | Pending |
-| MODEL-04 | Phase 1 | Pending |
-| MODEL-05 | Phase 1 | Pending |
-| MODEL-06 | Phase 1 | Pending |
-| MODEL-07 | Phase 1 | Pending |
-| MODEL-08 | Phase 1 | Pending |
-| AUDIO-01 | Phase 2 | Pending |
-| AUDIO-02 | Phase 2 | Pending |
-| AUDIO-03 | Phase 2 | Pending |
-| AUDIO-04 | Phase 2 | Pending |
-| AUDIO-05 | Phase 2 | Pending |
-| VAD-01 | Phase 2 | Pending |
-| VAD-02 | Phase 2 | Pending |
-| VAD-03 | Phase 2 | Pending |
-| VAD-04 | Phase 2 | Pending |
-| POST-01 | Phase 3 | Pending |
-| POST-02 | Phase 3 | Pending |
-| POST-03 | Phase 3 | Pending |
-| POST-04 | Phase 3 | Pending |
-| POST-05 | Phase 3 | Pending |
-| POST-06 | Phase 3 | Pending |
-| POST-07 | Phase 3 | Pending |
-| CFG-01 | Phase 4 | Pending |
-| CFG-02 | Phase 4 | Pending |
-| CFG-03 | Phase 4 | Pending |
-| CFG-04 | Phase 4 | Pending |
-| CFG-05 | Phase 4 | Pending |
-| TEST-01 | Phase 1 | Pending |
-| TEST-02 | Phase 1 | Pending |
-| TEST-03 | Phase 1 | Pending |
-| TEST-04 | Phase 1 | Pending |
-| TEST-05 | Phase 1 | Pending |
-| SRV-01 | Phase 1 | Pending |
-| SRV-02 | Phase 1 | Pending |
-| SRV-03 | Phase 1 | Pending |
+| SRV-01 | Phase 5 | Pending |
+| SRV-02 | Phase 5 | Pending |
+| SRV-03 | Phase 5 | Pending |
+| SRV-04 | Phase 5 | Pending |
+| SRV-05 | Phase 5 | Pending |
+| AUDIO-01 | Phase 6 | Pending |
+| AUDIO-02 | Phase 6 | Pending |
+| AUDIO-03 | Phase 6 | Pending |
+| AUDIO-04 | Phase 6 | Pending |
+| CLIENT-01 | Phase 7 | Pending |
+| CLIENT-02 | Phase 7 | Pending |
+| CLIENT-03 | Phase 7 | Pending |
+| CLIENT-04 | Phase 7 | Pending |
+| NET-01 | Phase 8 | Pending |
+| NET-02 | Phase 8 | Pending |
+| NET-03 | Phase 8 | Pending |
+| NET-04 | Phase 8 | Pending |
+| NET-05 | Phase 8 | Pending |
 
-**Coverage:**
-- v1 requirements: 43 total
-- Mapped to phases: 43
-- Unmapped: 0 ✓
+**Coverage:** 19/19 requirements mapped (100%)
 
 ---
-*Requirements defined: 2026-01-27*
-*Last updated: 2026-01-27 after roadmap creation*
+*Requirements defined: 2026-01-30*
+*Milestone: v1.1 - Remote Server Optimization*
