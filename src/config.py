@@ -59,6 +59,9 @@ class Config:
     auto_paste: bool = True  # Auto paste to focused window
     auto_enter: bool = False  # Press Enter after paste
 
+    # Remote processing settings
+    enable_remote_fallback: bool = False  # Enable remote server fallback (disabled by default for speed)
+
     # Paste method: "clipboard" (safe, uses Ctrl+Shift+V) or "type" (legacy, types characters)
     # "clipboard" is recommended - it's faster and doesn't crash terminal apps like Claude Code
     paste_method: str = "clipboard"  # clipboard | type
@@ -239,13 +242,13 @@ QUALITY_PROFILES = {
         "description": "⚖️ Balanced — Баланс скорости и качества",
     },
     "quality": {
-        "backend": "whisper",
-        "model_size": "small",
+        "backend": "sherpa",
+        "model_size": "giga-am-v2-ru",
         "vad_enabled": True,
         "vad_threshold": 0.3,
         "min_silence_duration_ms": 500,
         "enable_post_processing": True,
-        "description": "🎯 Quality — Максимальное качество",
+        "description": "🎯 Quality — Максимальное качество (Sherpa)",
     },
 }
 
