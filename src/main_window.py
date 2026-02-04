@@ -179,60 +179,98 @@ class TranscriptionThread(QThread):
 
 
 class HybridTranscriptionThread(QThread):
-    """Thread for hybrid transcription: remote first, then local fallback."""
+    """Thread for hybrid transcription: LOCAL first, then remote fallback.
+
+    Strategy:
+    1. Try local transcription (Sherpa) first with timeout
+    2. If local fails or takes >20 seconds, try remote
+    3. If remote also fails, return error
+    """
     transcription_done = pyqtSignal(str, float, bool)  # text, duration, is_remote
     transcription_error = pyqtSignal(str)
 
-    def __init__(self, remote_client, transcriber, audio, sample_rate: int):
+    # Timeout for local transcription before trying remote
+    LOCAL_TIMEOUT_SECONDS = 20.0
+
+    def __init__(self, remote_client, transcriber, audio, sample_rate: int, enable_remote: bool = False):
         super().__init__()
         self.remote_client = remote_client
-        self.transcriber = transcriber  # For fallback
+        self.transcriber = transcriber
         self.audio = audio
         self.sample_rate = sample_rate
         self._is_cancelled = False
+        self._enable_remote = enable_remote  # Allow disabling remote fallback
 
     def run(self):
         try:
             if self._is_cancelled:
                 return
 
-            start_time = time.time()
-
-            # Try remote transcription first
+            # === STEP 1: Try LOCAL transcription first ===
+            local_start = time.time()
             try:
-                text = self.remote_client.transcribe_remote(
-                    self.audio,
-                    self.sample_rate
-                )
-                duration = time.time() - start_time
+                # Use threading.Timer to implement timeout
+                import concurrent.futures
 
-                # Check if text is empty - trigger fallback
-                if not self._is_cancelled and not text:
-                    raise Exception("Remote transcription returned empty text")
-
-                if not self._is_cancelled and text:
-                    # Remote transcription successful
-                    self.transcription_done.emit(text, duration, True)  # is_remote=True
-                    return
-
-            except Exception as remote_error:
-                # Remote transcription failed → try local fallback
-                if not self._is_cancelled:
-                    with open("debug.log", "a", encoding="utf-8") as f:
-                        f.write(f"[DEBUG] Remote transcription failed: {remote_error}\n")
-                        f.write(f"[DEBUG] Falling back to local transcription\n")
-
-                    # Fallback to local transcription
-                    text, duration = self.transcriber.transcribe(
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(
+                        self.transcriber.transcribe,
                         self.audio,
                         self.sample_rate
                     )
 
+                    try:
+                        # Wait for local transcription with timeout
+                        text, duration = future.result(timeout=self.LOCAL_TIMEOUT_SECONDS)
+
+                        if not self._is_cancelled and text:
+                            # Local transcription successful!
+                            self.transcription_done.emit(text, duration, False)  # is_remote=False
+                            return
+
+                    except concurrent.futures.TimeoutError:
+                        # Local transcription took too long - cancel and try remote
+                        future.cancel()
+                        with open("debug.log", "a", encoding="utf-8") as f:
+                            f.write(f"[DEBUG] Local transcription timeout ({self.LOCAL_TIMEOUT_SECONDS}s)\n")
+                        raise Exception("Local transcription timeout")
+
+            except Exception as local_error:
+                # Local transcription failed - try remote fallback
+                if not self._is_cancelled:
+                    with open("debug.log", "a", encoding="utf-8") as f:
+                        f.write(f"[DEBUG] Local transcription failed: {local_error}\n")
+                        f.write(f"[DEBUG] Trying remote fallback...\n")
+
+            # === STEP 2: Try REMOTE transcription as fallback (if enabled) ===
+            if not self._is_cancelled and self._enable_remote:
+                try:
+                    remote_start = time.time()
+                    text = self.remote_client.transcribe_remote(
+                        self.audio,
+                        self.sample_rate
+                    )
+                    duration = time.time() - remote_start
+
                     if not self._is_cancelled and text:
-                        # Local transcription (fallback)
-                        self.transcription_done.emit(text, duration, False)  # is_remote=False
-                    elif not self._is_cancelled:
-                        self.transcription_error.emit("Empty result")
+                        # Remote transcription successful (fallback)
+                        self.transcription_done.emit(text, duration, True)  # is_remote=True
+                        return
+                    else:
+                        raise Exception("Remote transcription returned empty text")
+
+                except Exception as remote_error:
+                    # Both local and remote failed
+                    if not self._is_cancelled:
+                        with open("debug.log", "a", encoding="utf-8") as f:
+                            f.write(f"[DEBUG] Remote transcription also failed: {remote_error}\n")
+                        self.transcription_error.emit(f"Local and remote failed: {remote_error}")
+
+            # === Remote fallback disabled or not available ===
+            elif not self._is_cancelled:
+                with open("debug.log", "a", encoding="utf-8") as f:
+                    f.write(f"[DEBUG] Local transcription failed, remote fallback disabled\n")
+                self.transcription_error.emit("Local transcription failed. Enable remote fallback in settings if needed.")
 
         except Exception as e:
             if not self._is_cancelled:
@@ -1292,6 +1330,15 @@ class MainWindow(QMainWindow):
             # User dictionary
             user_dictionary=self.config.user_dictionary,
         )
+
+        # Preload model to avoid first transcription delay
+        self._on_progress("Preloading transcription model...")
+        try:
+            self.transcriber.load_model()
+            self._on_progress("Model loaded successfully!")
+        except Exception as e:
+            self._on_progress(f"Model preload failed: {e}")
+
         self.hotkey_manager = HotkeyManager(on_hotkey=self._on_hotkey)
         self.history_manager = HistoryManager(max_entries=50)
 
@@ -1721,12 +1768,13 @@ class MainWindow(QMainWindow):
         # Cleanup previous thread if exists
         self._cleanup_thread()
 
-        # Use hybrid transcription (remote first, then local fallback)
+        # Use hybrid transcription (LOCAL first, then remote fallback if enabled)
         self._thread = HybridTranscriptionThread(
             self.remote_client,
             self.transcriber,
             audio,
-            self.config.sample_rate
+            self.config.sample_rate,
+            enable_remote=getattr(self.config, 'enable_remote_fallback', False)
         )
         self._thread.transcription_done.connect(self._done)
         self._thread.transcription_error.connect(self._error)
