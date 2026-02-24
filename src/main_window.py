@@ -189,9 +189,6 @@ class HybridTranscriptionThread(QThread):
     transcription_done = pyqtSignal(str, float, bool)  # text, duration, is_remote
     transcription_error = pyqtSignal(str)
 
-    # Timeout for local transcription before trying remote
-    LOCAL_TIMEOUT_SECONDS = 20.0
-
     def __init__(self, remote_client, transcriber, audio, sample_rate: int, enable_remote: bool = False):
         super().__init__()
         self.remote_client = remote_client
@@ -200,6 +197,9 @@ class HybridTranscriptionThread(QThread):
         self.sample_rate = sample_rate
         self._is_cancelled = False
         self._enable_remote = enable_remote  # Allow disabling remote fallback
+        # Dynamic timeout: min 30s, or 40% of audio duration (for chunked processing)
+        audio_duration_sec = len(audio) / sample_rate
+        self._local_timeout = max(30.0, audio_duration_sec * 0.4)
 
     def run(self):
         try:
@@ -221,7 +221,7 @@ class HybridTranscriptionThread(QThread):
 
                     try:
                         # Wait for local transcription with timeout
-                        text, duration = future.result(timeout=self.LOCAL_TIMEOUT_SECONDS)
+                        text, duration = future.result(timeout=self._local_timeout)
 
                         if not self._is_cancelled and text:
                             # Local transcription successful!
@@ -232,7 +232,7 @@ class HybridTranscriptionThread(QThread):
                         # Local transcription took too long - cancel and try remote
                         future.cancel()
                         with open("debug.log", "a", encoding="utf-8") as f:
-                            f.write(f"[DEBUG] Local transcription timeout ({self.LOCAL_TIMEOUT_SECONDS}s)\n")
+                            f.write(f"[DEBUG] Local transcription timeout ({self._local_timeout:.1f}s)\n")
                         raise Exception("Local transcription timeout")
 
             except Exception as local_error:
@@ -1330,14 +1330,6 @@ class MainWindow(QMainWindow):
             # User dictionary
             user_dictionary=self.config.user_dictionary,
         )
-
-        # Preload model to avoid first transcription delay
-        self._on_progress("Preloading transcription model...")
-        try:
-            self.transcriber.load_model()
-            self._on_progress("Model loaded successfully!")
-        except Exception as e:
-            self._on_progress(f"Model preload failed: {e}")
 
         self.hotkey_manager = HotkeyManager(on_hotkey=self._on_hotkey)
         self.history_manager = HistoryManager(max_entries=50)

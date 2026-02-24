@@ -56,6 +56,11 @@ class SherpaBackend(BaseBackend):
         },
     }
 
+    # Chunking: long audio is split to prevent ONNX crash
+    CHUNK_DURATION_SEC = 25    # 25 seconds per chunk (safe for NeMo Transducer)
+    CHUNK_THRESHOLD_SEC = 30   # Apply chunking only for audio longer than this
+    CHUNK_SAMPLE_RATE = 16000  # Always 16kHz after resampling
+
     def __init__(
         self,
         model_size: str = "giga-am-v2-ru",
@@ -241,6 +246,27 @@ class SherpaBackend(BaseBackend):
         with self._lock:
             self._recognizer = None
 
+    def _transcribe_chunks(self, audio: np.ndarray) -> str:
+        """Split long audio into 25s chunks and transcribe each independently."""
+        chunk_size = self.CHUNK_DURATION_SEC * self.CHUNK_SAMPLE_RATE  # 400 000 samples
+        texts = []
+        offset = 0
+        while offset < len(audio):
+            chunk = audio[offset: offset + chunk_size]
+            if len(chunk) < 1600:   # Skip chunks < 0.1s (noise/silence tail)
+                break
+            try:
+                stream = self._recognizer.create_stream()
+                stream.accept_waveform(self.CHUNK_SAMPLE_RATE, chunk)
+                self._recognizer.decode_stream(stream)
+                chunk_text = stream.result.text.strip()
+                if chunk_text:
+                    texts.append(chunk_text)
+            except Exception:
+                pass  # Skip failed chunk, continue with next
+            offset += chunk_size
+        return " ".join(texts)
+
     def transcribe(
         self,
         audio: np.ndarray,
@@ -316,15 +342,15 @@ class SherpaBackend(BaseBackend):
                     # No speech segments detected
                     return "", 0.0
 
-            # Create audio stream from numpy array
-            # Sherpa-ONNX expects float32 audio normalized to [-1, 1]
-            stream = self._recognizer.create_stream()
-            stream.accept_waveform(16000, audio)
-
-            # Decode stream (singular!)
-            self._recognizer.decode_stream(stream)
-
-            text = stream.result.text.strip()
+            # Route: chunk long audio to avoid ONNX crash
+            audio_duration_sec = len(audio) / 16000.0
+            if audio_duration_sec > self.CHUNK_THRESHOLD_SEC:
+                text = self._transcribe_chunks(audio)
+            else:
+                stream = self._recognizer.create_stream()
+                stream.accept_waveform(16000, audio)
+                self._recognizer.decode_stream(stream)
+                text = stream.result.text.strip()
 
             process_time = time.time() - start_time
 
