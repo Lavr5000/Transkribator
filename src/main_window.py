@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog, QLineEdit, QAbstractItemView,
     QSlider
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread, QPoint, QRectF, QSize
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread, QPoint, QPointF, QRectF, QSize
 from PyQt6.QtGui import (
     QIcon, QPixmap, QFont, QAction, QColor,
     QPainter, QLinearGradient, QBrush, QPen, QMouseEvent,
@@ -290,12 +290,14 @@ class RecordButton(QPushButton):
         self._recording = False
         self._audio_level = 0.0
         self._wave_phase = 0.0
-        self.setFixedSize(36, 36)
+        self._level_history = [0.0] * 30  # Rolling buffer for waveform bars
+        self.setFixedSize(180, 36)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         # Animation timer for wave effect
         self._anim_timer = QTimer()
         self._anim_timer.timeout.connect(self._animate)
+
 
     def set_recording(self, recording: bool):
         self._recording = recording
@@ -308,11 +310,42 @@ class RecordButton(QPushButton):
 
     def set_audio_level(self, level: float):
         self._audio_level = min(1.0, level * 2)
+        self._level_history.append(self._audio_level)
+        self._level_history = self._level_history[-30:]
         self.update()
 
     def _animate(self):
         self._wave_phase += 0.3
         self.update()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._press_global = event.globalPosition().toPoint()
+            self._dragging = False
+            parent = self.window()
+            if parent and hasattr(parent, '_drag_pos'):
+                parent._drag_pos = event.globalPosition().toPoint() - parent.frameGeometry().topLeft()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.MouseButton.LeftButton and hasattr(self, '_press_global'):
+            delta = event.globalPosition().toPoint() - self._press_global
+            if abs(delta.x()) > 4 or abs(delta.y()) > 4:
+                self._dragging = True
+                parent = self.window()
+                if parent and hasattr(parent, '_drag_pos') and parent._drag_pos is not None:
+                    parent.move(event.globalPosition().toPoint() - parent._drag_pos)
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if getattr(self, '_dragging', False):
+            self._dragging = False
+            parent = self.window()
+            if parent and hasattr(parent, '_drag_pos'):
+                parent._drag_pos = None
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -322,61 +355,65 @@ class RecordButton(QPushButton):
         center_y = self.height() / 2
 
         if self._recording:
-            # Recording state - Algorithmic Presence cyan glow
-            base_alpha = 180
+            import math
+            w = self.width()   # 180
+            h = self.height()  # 36
+            bar_count = 30
+            bar_w = 3.0
+            gap = (w - bar_count * bar_w) / (bar_count + 1)
 
-            # Pulsing circles with cyan glow - 4 layers for richer effect
-            for i in range(4):
-                import math
-                phase_offset = i * 0.8
-                pulse = (math.sin(self._wave_phase + phase_offset) + 1) / 2
-                radius = 8 + i * 6 + self._audio_level * 8 * pulse
-                alpha = int(base_alpha * (1 - i * 0.25) * (0.5 + self._audio_level * 0.5))
+            painter.setPen(Qt.PenStyle.NoPen)
+            for i, lvl in enumerate(self._level_history):
+                phase_boost = (math.sin(self._wave_phase + i * 0.4) + 1) / 2 * 0.3
+                bar_h = max(2.0, (lvl + phase_boost) * (h - 8))
+                x = gap + i * (bar_w + gap)
+                y = (h - bar_h) / 2
 
-                painter.setPen(Qt.PenStyle.NoPen)
-                # Algorithmic Presence cyan
-                painter.setBrush(QColor(*COLORS['accent_secondary'], alpha))
-                painter.drawEllipse(
-                    QRectF(center_x - radius, center_y - radius, radius * 2, radius * 2)
-                )
+                brightness = int(160 + lvl * 95)
+                alpha = int(140 + lvl * 115)
+                painter.setBrush(QColor(0, brightness, 255, min(255, alpha)))
+                painter.drawRoundedRect(QRectF(x, y, bar_w, bar_h), 1.5, 1.5)
 
-            # Center circle (stop button) - light cyan
+            # Stop square: center of button
+            cx, cy = w / 2, h / 2
             painter.setBrush(QColor(*COLORS['accent_glow'], 240))
-            painter.drawRoundedRect(
-                QRectF(center_x - 6, center_y - 6, 12, 12), 2, 2
-            )
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(QRectF(cx - 5, cy - 5, 10, 10), 2, 2)
         else:
-            # Idle state - geometric mic icon with electric blue
-            # Outer glow on hover
+            # Hover glow
             if self.underMouse():
                 painter.setBrush(QColor(*COLORS['accent_primary'], 40))
                 painter.setPen(Qt.PenStyle.NoPen)
-                painter.drawEllipse(QRectF(2, 2, 32, 32))
+                painter.drawEllipse(QRectF(center_x - 18, center_y - 18, 36, 36))
 
-            # Mic body - electric blue color
-            painter.setPen(QPen(QColor(*COLORS['accent_secondary'], 220), 2))
+            # Soft glow around capsule — 4 layers, outermost first
+            painter.setPen(Qt.PenStyle.NoPen)
+            for offset in range(4, 0, -1):
+                glow_alpha = (5 - offset) * 7  # 7, 14, 21, 28
+                painter.setBrush(QColor(*COLORS['accent_glow'], glow_alpha))
+                painter.drawRoundedRect(
+                    QRectF(center_x - 4 - offset, center_y - 9 - offset,
+                           8 + offset * 2, 12 + offset * 2),
+                    3 + offset, 3 + offset
+                )
+
+            # Filled capsule (main element)
+            painter.setBrush(QColor(*COLORS['accent_secondary'], 225))
+            painter.drawRoundedRect(QRectF(center_x - 4, center_y - 9, 8, 12), 3, 3)
+
+            # Arc stand — 1.5px, slightly thinner than capsule
+            painter.setPen(QPen(QColor(*COLORS['accent_secondary'], 200), 1.5))
             painter.setBrush(Qt.BrushStyle.NoBrush)
-
-            # Mic head (rounded rect)
-            mic_rect = QRectF(center_x - 5, center_y - 10, 10, 14)
-            painter.drawRoundedRect(mic_rect, 5, 5)
-
-            # Mic stand curve
             path = QPainterPath()
-            path.moveTo(center_x - 8, center_y + 2)
-            path.quadTo(center_x - 8, center_y + 8, center_x, center_y + 8)
-            path.quadTo(center_x + 8, center_y + 8, center_x + 8, center_y + 2)
+            path.moveTo(center_x - 6, center_y + 1)
+            path.quadTo(center_x - 6, center_y + 8, center_x, center_y + 8)
+            path.quadTo(center_x + 6, center_y + 8, center_x + 6, center_y + 1)
             painter.drawPath(path)
 
-            # Mic stand
-            painter.drawLine(
-                QPoint(int(center_x), int(center_y + 8)),
-                QPoint(int(center_x), int(center_y + 12))
-            )
-            painter.drawLine(
-                QPoint(int(center_x - 5), int(center_y + 12)),
-                QPoint(int(center_x + 5), int(center_y + 12))
-            )
+            # Post and base — 1px, thinnest (visual hierarchy)
+            painter.setPen(QPen(QColor(*COLORS['accent_secondary'], 175), 1.0))
+            painter.drawLine(QPointF(center_x, center_y + 8), QPointF(center_x, center_y + 12))
+            painter.drawLine(QPointF(center_x - 4, center_y + 12), QPointF(center_x + 4, center_y + 12))
 
 
 class MiniButton(QPushButton):
@@ -417,13 +454,23 @@ class CopyButton(MiniButton):
     def _draw_icon(self, painter):
         alpha = int(255 * self._opacity)
         hover_boost = 60 if self.underMouse() else 0
+        color = QColor(255, 255, 255, min(255, alpha + hover_boost))
+        pen = QPen(color, 1.5)
 
-        painter.setPen(QPen(QColor(255, 255, 255, min(255, alpha + hover_boost)), 1.5))
+        # Back page (shifted up-right)
+        painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(QRectF(5, 2, 9, 11), 1.5, 1.5)
 
-        # Draw two overlapping rectangles (copy icon)
-        painter.drawRoundedRect(QRectF(3, 5, 8, 10), 1, 1)
-        painter.drawRoundedRect(QRectF(7, 3, 8, 10), 1, 1)
+        # Front page: fill with bg color first to occlude the back page
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(*COLORS['bg_mid']))
+        painter.drawRoundedRect(QRectF(2, 5, 9, 11), 1.5, 1.5)
+
+        # Front page outline
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(QRectF(2, 5, 9, 11), 1.5, 1.5)
 
 
 class HistoryButton(MiniButton):
@@ -441,24 +488,49 @@ class HistoryButton(MiniButton):
 
 class SettingsButton(MiniButton):
     def _draw_icon(self, painter):
+        import math
         alpha = int(255 * self._opacity)
         hover_boost = 60 if self.underMouse() else 0
+        color = QColor(255, 255, 255, min(255, alpha + hover_boost))
 
-        painter.setPen(QPen(QColor(255, 255, 255, min(255, alpha + hover_boost)), 1.5))
+        painter.setPen(QPen(color, 1.5))
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
-        # Geometric gear - 8 spokes for better look
-        import math
-        center_x, center_y = 9, 9
-        for i in range(8):
-            angle = i * math.pi / 4
-            r_inner, r_outer = 5, 8
-            x1, y1 = center_x + r_inner * math.cos(angle), center_y + r_inner * math.sin(angle)
-            x2, y2 = center_x + r_outer * math.cos(angle), center_y + r_outer * math.sin(angle)
-            painter.drawLine(QPoint(int(x1), int(y1)), QPoint(int(x2), int(y2)))
+        cx, cy = 9.0, 9.0
+        n = 6
+        r_body = 5.0    # gear body radius
+        r_tooth = 7.0   # tooth tip radius
+        tw = 0.22       # half tooth width in radians
 
-        # Center circle
-        painter.drawEllipse(QRectF(center_x - 3, center_y - 3, 6, 6))
+        path = QPainterPath()
+        first = True
+        for i in range(n):
+            base = i * 2 * math.pi / n - math.pi / 2
+            # 4 tooth points: enter, left-top, right-top, exit
+            pts = [
+                (r_body, base - tw),
+                (r_tooth, base - tw),
+                (r_tooth, base + tw),
+                (r_body, base + tw),
+            ]
+            for r, a in pts:
+                x = cx + r * math.cos(a)
+                y = cy + r * math.sin(a)
+                if first:
+                    path.moveTo(x, y); first = False
+                else:
+                    path.lineTo(x, y)
+            # Arc along body to next tooth (4 steps)
+            next_start = (i + 1) * 2 * math.pi / n - math.pi / 2 - tw
+            cur_end = base + tw
+            for s in range(1, 5):
+                a = cur_end + s * (next_start - cur_end) / 4
+                path.lineTo(cx + r_body * math.cos(a), cy + r_body * math.sin(a))
+        path.closeSubpath()
+        painter.drawPath(path)
+
+        # Hollow center hole
+        painter.drawEllipse(QRectF(cx - 2.5, cy - 2.5, 5, 5))
 
 
 class CloseButton(MiniButton):
@@ -1439,7 +1511,7 @@ class MainWindow(QMainWindow):
 
         # Center record button
         self.record_btn = RecordButton(self.central)
-        self.record_btn.move((COMPACT_WIDTH - 36) // 2, (COMPACT_HEIGHT - 36) // 2)
+        self.record_btn.move((COMPACT_WIDTH - 180) // 2, (COMPACT_HEIGHT - 36) // 2)
         self.record_btn.clicked.connect(self._toggle_recording)
 
         # VAD level bar removed - caused issues and not needed
@@ -1634,6 +1706,9 @@ class MainWindow(QMainWindow):
 
             # Проверяем что окно ещё существует и не закрывается
             if not self._shutting_down and not sip.isdeleted(self):
+                # Route audio level to RecordButton visualizer
+                self.audio_level_update.emit(min(1.0, level * 10))
+
                 # Convert level to percentage with higher gain for better sensitivity
                 # Audio levels are typically very small (0.001-0.1), so we amplify
                 percentage = min(100, int(level * 10000))
