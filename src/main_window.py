@@ -1570,20 +1570,14 @@ class MainWindow(QMainWindow):
     def _setup_tray(self):
         self.tray = QSystemTrayIcon(self)
 
-        pix = QPixmap(32, 32)
-        pix.fill(Qt.GlobalColor.transparent)
-        p = QPainter(pix)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        # Aural Flux gradient for tray icon
-        g = QLinearGradient(0, 0, 32, 0)
-        g.setColorAt(0, QColor(GRADIENT_COLORS['left']))
-        g.setColorAt(0.5, QColor(GRADIENT_COLORS['middle']))
-        g.setColorAt(1, QColor(GRADIENT_COLORS['right']))
-        p.setBrush(QBrush(g))
-        p.setPen(Qt.PenStyle.NoPen)
-        p.drawEllipse(2, 2, 28, 28)
-        p.end()
-        self.tray.setIcon(QIcon(pix))
+        import os as _os
+        _ico_path = _os.path.join(
+            _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+            'Transkribator_icon.ico'
+        )
+        app_icon = QIcon(_ico_path) if _os.path.exists(_ico_path) else QIcon()
+        self.tray.setIcon(app_icon)
+        self.setWindowIcon(app_icon)
 
         menu = QMenu()
         menu.addAction("Показать", self.show)
