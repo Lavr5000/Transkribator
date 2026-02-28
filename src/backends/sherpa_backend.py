@@ -1,5 +1,6 @@
 """Sherpa-ONNX backend implementation with GigaAM Russian models."""
 import os
+import sys
 import threading
 import time
 from pathlib import Path
@@ -129,7 +130,11 @@ class SherpaBackend(BaseBackend):
             return Path(self.model_path)
 
         # Default: models/sherpa/{model-name}
-        base_dir = Path(__file__).parent.parent.parent / "models" / "sherpa"
+        # In PyInstaller frozen build use exe directory; in dev use source root
+        if hasattr(sys, '_MEIPASS'):
+            base_dir = Path(sys._MEIPASS) / "models" / "sherpa"
+        else:
+            base_dir = Path(__file__).parent.parent.parent / "models" / "sherpa"
         return base_dir / self.model_size
 
     def _check_model_files(self) -> bool:
@@ -165,7 +170,11 @@ class SherpaBackend(BaseBackend):
         """Get Silero VAD model directory, download if missing."""
         from huggingface_hub import snapshot_download
 
-        vad_dir = Path(__file__).parent.parent.parent / "models" / "sherpa" / "silero-vad"
+        # In PyInstaller frozen build use exe directory; in dev use source root
+        if hasattr(sys, '_MEIPASS'):
+            vad_dir = Path(sys._MEIPASS) / "models" / "sherpa" / "silero-vad"
+        else:
+            vad_dir = Path(__file__).parent.parent.parent / "models" / "sherpa" / "silero-vad"
         vad_dir.mkdir(parents=True, exist_ok=True)
 
         # Check if model exists, download if missing

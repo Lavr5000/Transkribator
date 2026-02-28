@@ -14,6 +14,8 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 # Collect all data files from dependencies
 datas = []
 datas += collect_data_files('sherpa_onnx')
+# Project models (sherpa ONNX models for transcription)
+datas += [('models/sherpa/giga-am-v2-ru', 'models/sherpa/giga-am-v2-ru')]
 
 # Collect all submodules to ensure complete packaging
 hiddenimports = []
@@ -41,6 +43,7 @@ hiddenimports += [
     'src.mouse_handler',
     'src.transcriber',
     'src.backends',
+    'src.remote_client',
 ]
 
 # Additional dependencies
@@ -55,7 +58,7 @@ block_cipher = None
 
 a = Analysis(
     ['main.py'],
-    pathex=[],
+    pathex=['src'],
     binaries=[],
     datas=datas,
     hiddenimports=hiddenimports,

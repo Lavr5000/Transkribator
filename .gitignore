@@ -57,3 +57,5 @@ config.json
 # Claude Code temporary directories
 tmpclaude-*-cwd
 nul
+work_chats_session.session
+*.session
