@@ -57,9 +57,9 @@ whisper-typing = "src.main_window:run"
 whisper-typing-gui = "src.main_window:run"
 
 [project.urls]
-Homepage = "https://github.com/whispertyping/whisper-typing"
-Documentation = "https://github.com/whispertyping/whisper-typing#readme"
-Issues = "https://github.com/whispertyping/whisper-typing/issues"
+Homepage = "https://github.com/Lavr5000/Transkribator"
+Documentation = "https://github.com/Lavr5000/Transkribator#readme"
+Issues = "https://github.com/Lavr5000/Transkribator/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
