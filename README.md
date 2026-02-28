@@ -1,172 +1,96 @@
-# WhisperTyping
+<p align="center">
+  <img src="Transkribator_Icon.png" alt="Transkribator" width="120">
+</p>
 
-**Local Voice-to-Text Transcription App**
+<h1 align="center">Transkribator</h1>
 
-A free, unlimited, local voice transcription application powered by OpenAI's Whisper. Works completely offline, no API keys required, runs entirely on your computer.
+<p align="center">
+  <b>Voice-to-text for your desktop. Speak — it types.</b><br>
+  Offline · Free · Russian-first · Windows
+</p>
 
-![WhisperTyping Screenshot](assets/screenshot.png)
+<p align="center">
+  <a href="https://github.com/Lavr5000/Transkribator/releases/latest">
+    <img src="https://img.shields.io/github/v/release/Lavr5000/Transkribator?style=for-the-badge&label=Download&color=blue" alt="Download">
+  </a>
+  <a href="https://t.me/ai_vibes_coding_ru">
+    <img src="https://img.shields.io/badge/Telegram-AI_Vibes-blue?style=for-the-badge&logo=telegram" alt="Telegram">
+  </a>
+  <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="License">
+</p>
+
+---
+
+## What it does
+
+Transkribator turns your voice into text and pastes it directly into any active window. Press a hotkey, speak, release — done. No cloud, no API keys, no limits. Everything runs locally on your machine.
 
 ## Features
 
-- **100% Local Processing** - No internet required, your voice data never leaves your computer
-- **Unlimited Usage** - No API costs, no quotas, no limits
-- **Fast Transcription** - GPU acceleration with CUDA (50x realtime) or optimized CPU inference
-- **Global Hotkey** - Press `Ctrl+Shift+Space` anywhere to start/stop recording
-- **Auto-Type** - Automatically types transcribed text into any application
-- **Multi-Language** - Supports 99+ languages with auto-detection
-- **Modern UI** - Dark theme, system tray integration, always-on-top mode
+- **Instant voice input** — press `Ctrl+Shift+Space`, speak, text appears where your cursor is
+- **100% offline** — your voice never leaves your computer
+- **Russian-first** — powered by Sherpa-ONNX with the `giga-am-v2-ru` model, optimized for Russian speech
+- **Smart post-processing** — automatic capitalization, punctuation, and correction of common recognition errors
+- **Custom dictionary** — add your own words and corrections
+- **Multiple backends** — Sherpa-ONNX (fast, default) or Whisper (multi-language)
+- **Compact UI** — tiny always-on-top window that stays out of your way
+- **System tray** — minimizes to tray, launches at startup
 
-## Installation
+## Download
 
-### Quick Install (Recommended)
+### Ready-to-use EXE (Windows)
 
-#### Windows
-```batch
-# Download and extract the project
-# Run the installer
-scripts\install.bat
-```
+Go to [**Releases**](https://github.com/Lavr5000/Transkribator/releases/latest), download the ZIP archive, extract, and run `Transkribator.exe`. No installation or Python required.
 
-#### Linux/macOS
-```bash
-# Clone or download the project
-cd whisper_typing
-
-# Make scripts executable
-chmod +x scripts/*.sh
-
-# Run installer
-./scripts/install.sh
-```
-
-### Manual Install
+### From source
 
 ```bash
-# Create virtual environment
+git clone https://github.com/Lavr5000/Transkribator.git
+cd Transkribator
 python -m venv venv
-
-# Activate (Linux/macOS)
-source venv/bin/activate
-
-# Activate (Windows)
 venv\Scripts\activate
-
-# Install dependencies
 pip install -r requirements.txt
-
-# For GPU acceleration (NVIDIA)
-pip install -r requirements-gpu.txt
-
-# Run
 python main.py
 ```
 
 ## Usage
 
-1. **Start the app**: Run `python main.py` or use the desktop shortcut
-2. **Record**: Click the red button OR press `Ctrl+Shift+Space`
-3. **Speak**: Say what you want to transcribe
-4. **Stop**: Click the button again OR press `Ctrl+Shift+Space`
-5. **Result**: Text is automatically copied to clipboard and typed
-
-### Hotkey
-
-The default hotkey is `Ctrl+Shift+Space`. You can:
-- Press once to start recording
-- Press again to stop and transcribe
+1. Launch `Transkribator.exe` (or `python main.py`)
+2. Click the microphone button or press `Ctrl+Shift+Space`
+3. Speak
+4. Press the hotkey again — text is pasted into the active window
 
 ### Settings
 
-Access settings in the "Settings" tab:
-- **Model Size**: Choose from tiny to large (larger = more accurate, slower)
-- **Language**: Auto-detect or force a specific language
-- **Auto-Copy**: Automatically copy transcription to clipboard
-- **Auto-Paste**: Automatically type the text into active window
-- **Always on Top**: Keep window above other applications
+- **Backend**: Sherpa-ONNX (default, fast) or Whisper
+- **Quality profile**: Fast / Balanced / Quality
+- **Language**: Russian (default), or auto-detect with Whisper
+- **Custom dictionary**: Add corrections for domain-specific terms
 
 ## System Requirements
 
-### Minimum (CPU)
-- Python 3.9+
-- 4GB RAM
-- 2GB disk space (for base model)
+| | Minimum | Recommended |
+|---|---------|-------------|
+| **OS** | Windows 10 | Windows 11 |
+| **RAM** | 4 GB | 8 GB |
+| **Disk** | 500 MB (Sherpa) | 2 GB (with Whisper models) |
+| **Python** | 3.10+ (from source only) | 3.13 |
 
-### Recommended (GPU)
-- Python 3.9+
-- NVIDIA GPU with 4GB+ VRAM
-- CUDA 12.x
-- 8GB RAM
-- 10GB disk space (for large model)
+GPU is optional — Sherpa-ONNX runs efficiently on CPU.
 
-## Model Sizes
+## Tech Stack
 
-| Model | VRAM | Speed | Accuracy |
-|-------|------|-------|----------|
-| tiny | ~1GB | Fastest | Basic |
-| base | ~1GB | Fast | Good |
-| small | ~2GB | Medium | Better |
-| medium | ~5GB | Slow | Great |
-| large | ~10GB | Slowest | Best |
-| large-v3 | ~10GB | Slowest | Latest |
-
-## Troubleshooting
-
-### "No audio recorded"
-- Check your microphone is connected and working
-- Check system audio permissions
-- Try selecting a different input device
-
-### "Model loading failed"
-- Ensure you have enough RAM/VRAM
-- Try a smaller model (tiny/base)
-- Check internet connection for first download
-
-### "Hotkey not working"
-- On Linux, may need root access for global hotkeys
-- Try running with elevated privileges
-- Check for conflicts with other applications
-
-### GPU not detected
-- Install NVIDIA drivers
-- Install CUDA toolkit
-- Use `requirements-gpu.txt`
-
-## Project Structure
-
-```
-whisper_typing/
-├── main.py              # Entry point
-├── requirements.txt     # CPU dependencies
-├── requirements-gpu.txt # GPU dependencies
-├── pyproject.toml       # Package config
-├── README.md            # This file
-├── src/
-│   ├── __init__.py
-│   ├── config.py        # Configuration management
-│   ├── audio_recorder.py # Audio recording
-│   ├── transcriber.py   # Whisper integration
-│   ├── hotkeys.py       # Global hotkey handling
-│   └── main_window.py   # PyQt6 GUI
-├── scripts/
-│   ├── install.sh       # Linux/macOS installer
-│   ├── install.bat      # Windows installer
-│   ├── run.sh           # Linux/macOS launcher
-│   └── run.bat          # Windows launcher
-└── assets/
-    └── screenshot.png   # App screenshot
-```
+- **Speech recognition**: [Sherpa-ONNX](https://github.com/k2-fsa/sherpa-onnx) (giga-am-v2-ru), [faster-whisper](https://github.com/guillaumekln/faster-whisper)
+- **GUI**: PyQt6
+- **Hotkeys**: pynput
+- **Audio**: sounddevice + numpy
+- **Build**: PyInstaller
 
 ## License
 
-MIT License - Free for personal and commercial use.
+MIT — free for personal and commercial use.
 
-## Credits
+## Links
 
-- [OpenAI Whisper](https://github.com/openai/whisper) - Speech recognition model
-- [faster-whisper](https://github.com/guillaumekln/faster-whisper) - Optimized inference
-- [PyQt6](https://www.riverbankcomputing.com/software/pyqt/) - GUI framework
-- [sounddevice](https://python-sounddevice.readthedocs.io/) - Audio recording
-
-## Contributing
-
-Contributions welcome! Please feel free to submit issues and pull requests.
+- [Telegram: AI Vibes](https://t.me/ai_vibes_coding_ru) — updates and discussion
+- [Releases](https://github.com/Lavr5000/Transkribator/releases) — download latest version

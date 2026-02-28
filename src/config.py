@@ -24,7 +24,7 @@ class Config:
     model_size: str = "giga-am-v2-ru"  # For Sherpa: giga-am-v2-ru (default), giga-am-ru
                                       # For Whisper: tiny, base, small, medium, large
                                       # For Podlodka: podlodka-turbo
-    language: str = "auto"  # auto-detect or specific language code
+    language: str = "ru"  # auto-detect or specific language code
     device: str = "auto"  # auto, cpu, cuda
     compute_type: str = "auto"  # auto, int8, float16, float32
     enable_post_processing: bool = True  # Enable text post-processing for better accuracy
