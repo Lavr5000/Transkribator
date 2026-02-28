@@ -92,5 +92,7 @@ MIT — free for personal and commercial use.
 
 ## Links
 
+- [Portfolio: AI Vibes](https://lavr5000-portfolio.pages.dev) — all projects
 - [Telegram: AI Vibes](https://t.me/ai_vibes_coding_ru) — updates and discussion
+- [YouTube](https://www.youtube.com/@Lavr5000) — demos and tutorials
 - [Releases](https://github.com/Lavr5000/Transkribator/releases) — download latest version
