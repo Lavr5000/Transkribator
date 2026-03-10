@@ -55,6 +55,13 @@ class SherpaBackend(BaseBackend):
             ],
             "language": "ru",
         },
+        "giga-am-v3-ru": {
+            "name": "GigaAM v3 Russian CTC (2025)",
+            "url": "",
+            "files": ["v3_ctc.int8.onnx", "tokens.txt"],
+            "ctc_model_file": "v3_ctc.int8.onnx",
+            "language": "ru",
+        },
     }
 
     # Chunking: long audio is split to prevent ONNX crash
@@ -64,7 +71,7 @@ class SherpaBackend(BaseBackend):
 
     def __init__(
         self,
-        model_size: str = "giga-am-v2-ru",
+        model_size: str = "giga-am-v3-ru",
         device: str = "auto",
         compute_type: str = "auto",
         language: str = "auto",
@@ -154,8 +161,9 @@ class SherpaBackend(BaseBackend):
             self._model_files_checked = False
             return False
 
-        # Check for CTC model file (model.int8.onnx)
-        has_ctc = (model_dir / "model.int8.onnx").exists() or (model_dir / "model.onnx").exists()
+        # Check for CTC model file (model-specific filename or default)
+        ctc_filename = self.MODELS.get(self.model_size, {}).get("ctc_model_file", "model.int8.onnx")
+        has_ctc = (model_dir / ctc_filename).exists() or (model_dir / "model.onnx").exists()
 
         # Check for encoder/decoder/joiner files (Transducer mode)
         has_transducer = (
@@ -219,7 +227,8 @@ class SherpaBackend(BaseBackend):
                 )
 
             # Detect model type - CTC vs Transducer
-            model_file = model_dir / "model.int8.onnx"
+            ctc_filename = self.MODELS.get(self.model_size, {}).get("ctc_model_file", "model.int8.onnx")
+            model_file = model_dir / ctc_filename
             tokens_file = model_dir / "tokens.txt"
 
             if model_file.exists():
