@@ -109,5 +109,5 @@ class BaseBackend(ABC):
         class_name = self.__class__.__name__
         # Remove 'Backend' suffix if present
         if class_name.endswith('Backend'):
-            class_name = class_name[:-8]  # Remove 'Backend'
+            class_name = class_name[:-7]  # Remove 'Backend'
         return class_name.lower()
