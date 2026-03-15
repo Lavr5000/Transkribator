@@ -63,7 +63,7 @@ class SherpaBackend(BaseBackend):
 
     def __init__(
         self,
-        model_size: str = "giga-am-v2-ru",
+        model_size: str = "giga-am-v3-ru",
         device: str = "auto",
         compute_type: str = "auto",
         language: str = "auto",
