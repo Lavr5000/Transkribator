@@ -62,3 +62,10 @@ work_chats_session.session
 
 # Archived junk files
 Архив/
+
+# Generated images (not icons)
+banner_*
+Gemini_Generated_Image_*
+
+# Planning docs (Claude-generated)
+.planning/

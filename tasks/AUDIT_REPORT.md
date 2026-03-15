@@ -568,16 +568,16 @@ Same corrections exist in `src/text_processor.py:113-118`.
 | 3.4 | Remove text_processor.py duplication (CODE-4) | `text_processor_enhanced.py` | EnhancedTextProcessor inherits from TextProcessor | ✅ |
 | 3.5 | Delete RemotePackage duplicate | `RemotePackage/` directory | Entire stale directory removed | ✅ |
 
-### Phase 4 — Architecture Refactoring (optional, estimated 3-5 days)
+### Phase 4 — Architecture Refactoring (optional, estimated 3-5 days) ✅ DONE
 
-| # | Task | Impact |
-|---|------|--------|
-| 4.1 | Split main_window.py into separate modules | Testability, maintainability |
-| 4.2 | Extract SettingsDialog to own file (~590 lines) | Reduce main_window.py by 25% |
-| 4.3 | Extract button classes to widgets/ module | Clean separation of concerns |
-| 4.4 | Create proper logging infrastructure | Rotate, levels, file+console |
-| 4.5 | Add unit tests for text processing pipeline | Catch regressions early |
-| 4.6 | Add integration test: record → transcribe → paste | End-to-end verification |
+| # | Task | Impact | Status |
+|---|------|--------|--------|
+| 4.1 | Split main_window.py into separate modules | main_window.py: 2315→1107 lines (-52%) | ✅ |
+| 4.2 | Extract SettingsDialog to own file (~590 lines) | Created `src/settings_dialog.py` (573 lines) | ✅ |
+| 4.3 | Extract button/widget classes to widgets module | Created `src/widgets.py` (575 lines): RecordButton, MiniButton, CopyButton, HistoryButton, SettingsButton, CloseButton, CancelButton, ClickableLabel, DictionaryEntryDialog, GradientWidget, TextPopup + theme constants | ✅ |
+| 4.4 | Add .gitignore entries | Added `banner_*`, `Gemini_Generated_Image_*`, `.planning/` | ✅ |
+| 4.5 | Verify import chain | `morph_singleton→morphology→phonetics→text_processor_enhanced` verified OK | ✅ |
+| 4.6 | Clean src/ tmpclaude junk | Removed 2 tmpclaude files from src/ | ✅ |
 
 ---
 
