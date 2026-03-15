@@ -1,7 +1,10 @@
 """Main window for ГолосТекст application - Compact WhisperTyping style."""
 import sys
+import os
 import time
 import json
+import logging
+import logging.handlers
 import threading
 from typing import Optional, List
 
@@ -35,6 +38,17 @@ try:
     CLIPBOARD_AVAILABLE = True
 except ImportError:
     CLIPBOARD_AVAILABLE = False
+
+# Configure logging with rotation
+_log_dir = os.path.dirname(os.path.abspath(__file__))
+_log_path = os.path.join(os.path.dirname(_log_dir), "debug.log")
+_handler = logging.handlers.RotatingFileHandler(
+    _log_path, maxBytes=512_000, backupCount=2, encoding="utf-8"
+)
+_handler.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+logger = logging.getLogger("transkribator")
+logger.setLevel(logging.DEBUG)
+logger.addHandler(_handler)
 
 
 # Gradient colors - Algorithmic Presence theme
@@ -231,16 +245,14 @@ class HybridTranscriptionThread(QThread):
                     except concurrent.futures.TimeoutError:
                         # Local transcription took too long - cancel and try remote
                         future.cancel()
-                        with open("debug.log", "a", encoding="utf-8") as f:
-                            f.write(f"[DEBUG] Local transcription timeout ({self._local_timeout:.1f}s)\n")
+                        logger.debug("Local transcription timeout (%.1fs)", self._local_timeout)
                         raise Exception("Local transcription timeout")
 
             except Exception as local_error:
                 # Local transcription failed - try remote fallback
                 if not self._is_cancelled:
-                    with open("debug.log", "a", encoding="utf-8") as f:
-                        f.write(f"[DEBUG] Local transcription failed: {local_error}\n")
-                        f.write(f"[DEBUG] Trying remote fallback...\n")
+                    logger.debug("Local transcription failed: %s", local_error)
+                    logger.debug("Trying remote fallback...")
 
             # === STEP 2: Try REMOTE transcription as fallback (if enabled) ===
             if not self._is_cancelled and self._enable_remote:
@@ -262,20 +274,17 @@ class HybridTranscriptionThread(QThread):
                 except Exception as remote_error:
                     # Both local and remote failed
                     if not self._is_cancelled:
-                        with open("debug.log", "a", encoding="utf-8") as f:
-                            f.write(f"[DEBUG] Remote transcription also failed: {remote_error}\n")
+                        logger.debug("Remote transcription also failed: %s", remote_error)
                         self.transcription_error.emit(f"Local and remote failed: {remote_error}")
 
             # === Remote fallback disabled or not available ===
             elif not self._is_cancelled:
-                with open("debug.log", "a", encoding="utf-8") as f:
-                    f.write(f"[DEBUG] Local transcription failed, remote fallback disabled\n")
+                logger.debug("Local transcription failed, remote fallback disabled")
                 self.transcription_error.emit("Local transcription failed. Enable remote fallback in settings if needed.")
 
         except Exception as e:
             if not self._is_cancelled:
-                with open("debug.log", "a", encoding="utf-8") as f:
-                    f.write(f"[DEBUG] HybridTranscriptionThread error: {e}\n")
+                logger.debug("HybridTranscriptionThread error: %s", e)
                 self.transcription_error.emit(str(e))
 
     def cancel(self):
@@ -1737,21 +1746,18 @@ class MainWindow(QMainWindow):
     def _toggle_recording(self):
         # Защита от повторных вызовов во время обработки транскрибации
         if self._processing:
-            with open("debug.log", "a", encoding="utf-8") as f:
-                f.write("[DEBUG] _toggle_recording BLOCKED by _processing flag\n")
+            logger.debug("_toggle_recording BLOCKED by _processing flag")
             return
 
         # Debounce: блокируем только ПОВТОРНЫЙ запуск, не остановку!
         if not self._recording:
             current_time = time.time()
             if current_time - self._last_toggle_time < 0.3:
-                with open("debug.log", "a", encoding="utf-8") as f:
-                    f.write(f"[DEBUG] _toggle_recording START BLOCKED by debounce ({current_time - self._last_toggle_time:.3f}s)\n")
+                logger.debug("_toggle_recording START BLOCKED by debounce (%.3fs)", current_time - self._last_toggle_time)
                 return
             self._last_toggle_time = current_time
 
-        with open("debug.log", "a", encoding="utf-8") as f:
-            f.write(f"[DEBUG] _toggle_recording: _recording={self._recording}, _processing={self._processing}\n")
+        logger.debug("_toggle_recording: _recording=%s, _processing=%s", self._recording, self._processing)
 
         if self._recording:
             self._stop()
@@ -1759,8 +1765,7 @@ class MainWindow(QMainWindow):
             self._start()
 
     def _start(self):
-        with open("debug.log", "a", encoding="utf-8") as f:
-            f.write(f"[DEBUG] _start() called, _recording={self._recording}, _processing={self._processing}\n")
+        logger.debug("_start() called, _recording=%s, _processing=%s", self._recording, self._processing)
 
         # Reset VAD level bar to silence state (if exists)
         if self.vad_level_bar:
@@ -1782,15 +1787,12 @@ class MainWindow(QMainWindow):
             self.cancel_btn.show()
             self.close_btn.hide()
 
-            with open("debug.log", "a", encoding="utf-8") as f:
-                f.write(f"[DEBUG] _start() SUCCESS: recording started\n")
+            logger.debug("_start() SUCCESS: recording started")
         else:
-            with open("debug.log", "a", encoding="utf-8") as f:
-                f.write(f"[DEBUG] _start() FAILED: recorder.start() returned False\n")
+            logger.debug("_start() FAILED: recorder.start() returned False")
 
     def _stop(self):
-        with open("debug.log", "a", encoding="utf-8") as f:
-            f.write(f"[DEBUG] _stop() called, _recording={self._recording}, _processing={self._processing}\n")
+        logger.debug("_stop() called, _recording=%s, _processing=%s", self._recording, self._processing)
 
         self._recording = False
         self._processing = True  # Блокируем повторные вызовы
@@ -1809,8 +1811,7 @@ class MainWindow(QMainWindow):
         self.cancel_btn.hide()
         self.close_btn.show()
 
-        with open("debug.log", "a", encoding="utf-8") as f:
-            f.write(f"[DEBUG] _stop(): audio is None={audio is None}, len={len(audio) if audio is not None else 0}\n")
+        logger.debug("_stop(): audio is None=%s, len=%s", audio is None, len(audio) if audio is not None else 0)
 
         if audio is None or len(audio) == 0 or self.recorder.get_duration(audio) < 0.5:
             self.status_label.setText("Готово")
@@ -1818,8 +1819,7 @@ class MainWindow(QMainWindow):
             if not self._hover:
                 self.status_label.hide()
             self._processing = False  # Разблокируем
-            with open("debug.log", "a", encoding="utf-8") as f:
-                f.write(f"[DEBUG] _stop(): audio too short, _processing set to False\n")
+            logger.debug("_stop(): audio too short, _processing set to False")
             return
 
         self.status_label.setText("Обработка...")
@@ -1842,13 +1842,11 @@ class MainWindow(QMainWindow):
         self._thread.finished.connect(self._on_thread_finished)  # QThread.finished for cleanup
         self._thread.start()
 
-        with open("debug.log", "a", encoding="utf-8") as f:
-            f.write(f"[DEBUG] _stop(): transcription thread started, _processing={self._processing}\n")
+        logger.debug("_stop(): transcription thread started, _processing=%s", self._processing)
 
     def _cancel_recording(self):
         """Отменить запись без транскрибации."""
-        with open("debug.log", "a", encoding="utf-8") as f:
-            f.write(f"[DEBUG] _cancel_recording() called\n")
+        logger.debug("_cancel_recording() called")
 
         # Reset VAD level bar to silence state (if exists)
         if self.vad_level_bar:
@@ -1876,8 +1874,7 @@ class MainWindow(QMainWindow):
         self.cancel_btn.hide()
         self.close_btn.show()
 
-        with open("debug.log", "a", encoding="utf-8") as f:
-            f.write(f"[DEBUG] _cancel_recording(): recording cancelled\n")
+        logger.debug("_cancel_recording(): recording cancelled")
 
     def _update_timer(self):
         elapsed = time.time() - self._rec_start
@@ -1892,8 +1889,7 @@ class MainWindow(QMainWindow):
             duration: Transcription duration in seconds
             is_remote: True if remote transcription was used, False if local fallback
         """
-        with open("debug.log", "a", encoding="utf-8") as f:
-            f.write(f"[DEBUG] _done() called, setting _processing=False, text_len={len(text)}, is_remote={is_remote}\n")
+        logger.debug("_done() called, setting _processing=False, text_len=%d, is_remote=%s", len(text), is_remote)
 
         # Reset VAD level bar to silence state (if exists)
         if self.vad_level_bar:
@@ -1918,27 +1914,22 @@ class MainWindow(QMainWindow):
         self.timer_label.show()
 
         # Show mode indicator (local/remote)
-        with open("debug.log", "a", encoding="utf-8") as f:
-            f.write(f"[DEBUG] Transcription time: {transcription_time:.1f}s, is_remote={is_remote}\n")
+        logger.debug("Transcription time: %.1fs, is_remote=%s", transcription_time, is_remote)
 
         try:
             if is_remote:  # Remote transcription successful
                 self.mode_label.setText("🌐")
                 self.mode_label.setToolTip("Удаленная транскрибация")
-                with open("debug.log", "a", encoding="utf-8") as f:
-                    f.write(f"[DEBUG] Mode: REMOTE (is_remote=True)\n")
+                logger.debug("Mode: REMOTE (is_remote=True)")
             else:  # Local transcription (fallback)
                 self.mode_label.setText("🏠")
                 self.mode_label.setToolTip("Локальная транскрибация")
-                with open("debug.log", "a", encoding="utf-8") as f:
-                    f.write(f"[DEBUG] Mode: LOCAL (is_remote=False, fallback)\n")
+                logger.debug("Mode: LOCAL (is_remote=False, fallback)")
             self.mode_label.show()
 
-            with open("debug.log", "a", encoding="utf-8") as f:
-                f.write(f"[DEBUG] Mode label shown: {self.mode_label.text()}\n")
+            logger.debug("Mode label shown: %s", self.mode_label.text())
         except Exception as e:
-            with open("debug.log", "a", encoding="utf-8") as f:
-                f.write(f"[ERROR] Failed to show mode_label: {e}\n")
+            logger.error("Failed to show mode_label: %s", e)
 
         QTimer.singleShot(5000, self._hide_timer_after_done)  # Changed to 5 seconds
 
@@ -1967,8 +1958,7 @@ class MainWindow(QMainWindow):
         if self.config.auto_paste:
             QTimer.singleShot(100, lambda: self._type(text))
 
-        with open("debug.log", "a", encoding="utf-8") as f:
-            f.write(f"[DEBUG] _done() finished, _processing={self._processing}\n")
+        logger.debug("_done() finished, _processing=%s", self._processing)
 
     def _hide_timer_after_done(self):
         """Скрыть таймер после показа результата."""
@@ -1989,8 +1979,7 @@ class MainWindow(QMainWindow):
         self.cancel_btn.hide()
         self.close_btn.show()
 
-        with open("debug.log", "a", encoding="utf-8") as f:
-            f.write(f"[DEBUG] _error() called: {err}\n")
+        logger.debug("_error() called: %s", err)
 
     def _type(self, text):
         """Paste or type text based on config.paste_method."""

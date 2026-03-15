@@ -2,6 +2,8 @@
 import re
 from typing import Dict, List, Tuple, Optional
 
+from text_processor import TextProcessor
+
 try:
     from deepmultilingualpunctuation import PunctuationModel
     PUNCTUATION_AVAILABLE = True
@@ -37,7 +39,7 @@ except ImportError:
     print("[WARNING] proper_nouns module not available")
 
 
-class EnhancedTextProcessor:
+class EnhancedTextProcessor(TextProcessor):
     """Enhanced text processor with punctuation restoration and Sherpa-specific corrections."""
 
     def __init__(self, language: str = "ru", enable_corrections: bool = True, enable_punctuation: bool = True, enable_phonetics: bool = True, enable_morphology: bool = True, enable_proper_nouns: bool = True, backend: str = "sherpa", user_dictionary: list = None):
@@ -462,17 +464,7 @@ class EnhancedTextProcessor:
             (r'\bв вследствие\b', 'вследствие'),
         ]
 
-    def _english_corrections(self):
-        """Load English language error corrections."""
-        # Removed unconditional corrections ("their"->"there", "your"->"you're", etc.)
-        # These replace valid words without syntactic analysis
-        self.corrections = {}
-
-        self.pattern_corrections = [
-            (r'\s+', ' '),
-            (r'\s+([,.!?;:])', r'\1'),
-            (r'([,.!?;:])(?=[A-Za-z])', r'\1 '),
-        ]
+    # _english_corrections() inherited from TextProcessor
 
     def _compile_patterns(self):
         """Pre-compile regex patterns for error correction to improve performance."""
@@ -617,19 +609,7 @@ class EnhancedTextProcessor:
 
         return text
 
-    def _fix_repeated_letters(self, text: str) -> str:
-        """Fix repeated letters (Whisper artifact)."""
-        corrections = [
-            (r'\bтуулыбки\b', 'улыбки'),
-            (r'\bтулыбки\b', 'улыбки'),
-            (r'\bтулыбкой\b', 'улыбкою'),
-            (r'\bтулыбкою\b', 'улыбкою'),
-        ]
-
-        for pattern, replacement in corrections:
-            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
-
-        return text
+    # _fix_repeated_letters() inherited from TextProcessor
 
     def _add_punctuation(self, text: str) -> str:
         """Restore punctuation using ML model."""

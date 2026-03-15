@@ -59,3 +59,6 @@ tmpclaude-*-cwd
 nul
 work_chats_session.session
 *.session
+
+# Archived junk files
+Архив/

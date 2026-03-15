@@ -7,12 +7,7 @@ Uses singleton pattern for pymorphy2.MorphAnalyzer to avoid performance issues.
 import re
 from typing import Optional, List, Tuple
 
-try:
-    import pymorphy2
-    PYMORPHY2_AVAILABLE = True
-except ImportError:
-    PYMORPHY2_AVAILABLE = False
-    print("[WARNING] pymorphy2 not installed. Install with: pip install pymorphy2")
+from morph_singleton import PYMORPHY2_AVAILABLE, get_morph
 
 
 class MorphologyCorrector:
@@ -22,13 +17,9 @@ class MorphologyCorrector:
     is created per process, improving performance.
     """
 
-    # Class-level singleton instance
-    _morph = None
-
     def __init__(self):
-        """Initialize morphological corrector with singleton MorphAnalyzer."""
-        if PYMORPHY2_AVAILABLE and MorphologyCorrector._morph is None:
-            MorphologyCorrector._morph = pymorphy2.MorphAnalyzer()
+        """Initialize morphological corrector with shared MorphAnalyzer."""
+        self._morph = get_morph()
 
         # Word-level cache to avoid re-parsing
         self._cache = {}

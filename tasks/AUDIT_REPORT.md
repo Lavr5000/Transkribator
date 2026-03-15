@@ -558,15 +558,15 @@ Same corrections exist in `src/text_processor.py:113-118`.
 | 2.5 | Fix MainWindow() reference (BUG-7) | `main_window.py:2324` | `window = MainWindow(); window.show()` | ✅ |
 | 2.6 | Add pyproject.toml: sherpa-onnx dependency (CODE-6) | `pyproject.toml:30-38` | Added sherpa-onnx to deps, moved faster-whisper to `[whisper]` optional | ✅ |
 
-### Phase 3 — Performance Optimization (estimated 2-3 days)
+### Phase 3 — Performance Optimization (estimated 2-3 days) ✅ DONE
 
-| # | Task | File(s) | Impact |
-|---|------|---------|--------|
-| 3.1 | Share MorphAnalyzer singleton (CODE-3) | `morphology.py`, `phonetics.py` | Save ~50MB RAM, ~1.5s startup |
-| 3.2 | Replace debug.log with logging module (CODE-2) | `main_window.py` (25 locations) | Proper logging with rotation |
-| 3.3 | Clean workspace junk (CODE-5) | Project root | Delete 280+ files, save 8MB |
-| 3.4 | Remove text_processor.py duplication (CODE-4) | `text_processor.py`, `text_processor_enhanced.py` | EnhancedTextProcessor inherits from base |
-| 3.5 | Delete RemotePackage duplicate | `RemotePackage/` directory | Entire src/ copy is stale |
+| # | Task | File(s) | Impact | Status |
+|---|------|---------|--------|--------|
+| 3.1 | Share MorphAnalyzer singleton (CODE-3) | `morph_singleton.py` (new), `morphology.py`, `phonetics.py` | Save ~50MB RAM, ~1.5s startup | ✅ |
+| 3.2 | Replace debug.log with logging module (CODE-2) | `main_window.py` (25 locations) | RotatingFileHandler, 512KB max, 2 backups | ✅ |
+| 3.3 | Clean workspace junk (CODE-5) | Project root | 217 tmpclaude + logs + PNGs deleted, scripts archived | ✅ |
+| 3.4 | Remove text_processor.py duplication (CODE-4) | `text_processor_enhanced.py` | EnhancedTextProcessor inherits from TextProcessor | ✅ |
+| 3.5 | Delete RemotePackage duplicate | `RemotePackage/` directory | Entire stale directory removed | ✅ |
 
 ### Phase 4 — Architecture Refactoring (optional, estimated 3-5 days)
 

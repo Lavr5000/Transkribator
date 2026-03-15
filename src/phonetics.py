@@ -7,13 +7,7 @@ Handles voiced/unvoiced consonant substitutions common in ASR:
 import re
 from typing import Optional
 
-# Try to import pymorphy2 for vocabulary validation
-try:
-    from pymorphy2 import MorphAnalyzer
-    PYMORPHY_AVAILABLE = True
-except ImportError:
-    PYMORPHY_AVAILABLE = False
-    print("[WARNING] pymorphy2 not installed. Vocabulary validation disabled. Install with: pip install pymorphy2")
+from morph_singleton import PYMORPHY2_AVAILABLE as PYMORPHY_AVAILABLE, get_morph
 
 
 # Voiced/unvoiced consonant pairs in Russian
@@ -40,9 +34,6 @@ class PhoneticCorrector:
     validation to avoid over-correction.
     """
 
-    # Class-level singleton for MorphAnalyzer (expensive to create)
-    _morph = None
-
     def __init__(self, enable_validation: bool = True):
         """Initialize phonetic corrector.
 
@@ -52,9 +43,8 @@ class PhoneticCorrector:
         """
         self.enable_validation = enable_validation and PYMORPHY_AVAILABLE
 
-        # Lazy-load MorphAnalyzer on first use
-        if self.enable_validation and PhoneticCorrector._morph is None:
-            PhoneticCorrector._morph = MorphAnalyzer()
+        # Use shared MorphAnalyzer singleton
+        self._morph = get_morph() if self.enable_validation else None
 
     def _is_valid_russian_word(self, word: str) -> bool:
         """Check if word is valid Russian vocabulary.
@@ -65,14 +55,14 @@ class PhoneticCorrector:
         Returns:
             True if word exists in Russian vocabulary
         """
-        if not self.enable_validation or not PhoneticCorrector._morph:
+        if not self.enable_validation or not self._morph:
             return True  # Assume valid if validation disabled
 
         if not word:
             return False
 
         # Parse with pymorphy2
-        parsed = PhoneticCorrector._morph.parse(word)
+        parsed = self._morph.parse(word)
 
         # Word is valid if it has at least one parse with high confidence
         # Score > 0.1 indicates a legitimate morphological analysis
