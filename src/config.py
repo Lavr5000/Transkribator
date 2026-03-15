@@ -21,7 +21,7 @@ class Config:
     backend: str = "sherpa"  # whisper, sherpa (sherpa is ~30% faster for Russian)
 
     # Model settings
-    model_size: str = "giga-am-v2-ru"  # For Sherpa: giga-am-v2-ru (default), giga-am-v3-ru, giga-am-ru
+    model_size: str = "giga-am-v3-ru"  # For Sherpa: giga-am-v3-ru (default), giga-am-v2-ru, giga-am-ru
                                       # For Whisper: tiny, base, small, medium, large
                                       # For Podlodka: podlodka-turbo
     language: str = "ru"  # auto-detect or specific language code
@@ -157,8 +157,8 @@ WHISPER_MODELS = {
 
 # Available Sherpa-ONNX models
 SHERPA_MODELS = {
-    "giga-am-v3-ru": "GigaAM v3 Russian (2025, newest)",
-    "giga-am-v2-ru": "GigaAM v2 Russian (2025, recommended)",
+    "giga-am-v3-ru": "GigaAM v3 Russian (2025, recommended)",
+    "giga-am-v2-ru": "GigaAM v2 Russian (2025)",
     "giga-am-ru": "GigaAM Russian (2024)",
 }
 
@@ -220,7 +220,7 @@ PASTE_METHODS = {
 QUALITY_PROFILES = {
     "fast": {
         "backend": "sherpa",
-        "model_size": "giga-am-v2-ru",
+        "model_size": "giga-am-v3-ru",
         "vad_enabled": False,
         "vad_threshold": 0.5,
         "min_silence_duration_ms": 800,
@@ -229,7 +229,7 @@ QUALITY_PROFILES = {
     },
     "balanced": {
         "backend": "sherpa",
-        "model_size": "giga-am-v2-ru",
+        "model_size": "giga-am-v3-ru",
         "vad_enabled": True,
         "vad_threshold": 0.5,
         "min_silence_duration_ms": 800,
@@ -238,7 +238,7 @@ QUALITY_PROFILES = {
     },
     "quality": {
         "backend": "sherpa",
-        "model_size": "giga-am-v2-ru",
+        "model_size": "giga-am-v3-ru",
         "vad_enabled": True,
         "vad_threshold": 0.3,
         "min_silence_duration_ms": 500,

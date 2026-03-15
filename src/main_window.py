@@ -846,7 +846,7 @@ class MainWindow(QMainWindow):
         if bid != self.config.backend:
             self.config.backend = bid
             self._settings._update_model_options()
-            default = {"whisper": "base", "sherpa": "giga-am-v2-ru", "podlodka-turbo": "podlodka-turbo"}.get(bid, "base")
+            default = {"whisper": "base", "sherpa": "giga-am-v3-ru", "podlodka-turbo": "podlodka-turbo"}.get(bid, "base")
             self.config.model_size = default
             self.config.save()
             self.transcriber.switch_backend(bid, default)
