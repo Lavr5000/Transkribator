@@ -43,20 +43,28 @@ def check_dependencies():
     except ImportError:
         missing.append("numpy")
 
-    # Check for Whisper
-    whisper_ok = False
-    try:
-        from faster_whisper import WhisperModel
-        whisper_ok = True
-    except ImportError:
-        try:
-            import whisper
-            whisper_ok = True
-        except ImportError:
-            pass
+    # Check for at least one transcription backend
+    has_backend = False
 
-    if not whisper_ok:
-        missing.append("faster-whisper or openai-whisper")
+    try:
+        import sherpa_onnx
+        has_backend = True
+    except ImportError:
+        pass
+
+    if not has_backend:
+        try:
+            from faster_whisper import WhisperModel
+            has_backend = True
+        except ImportError:
+            try:
+                import whisper
+                has_backend = True
+            except ImportError:
+                pass
+
+    if not has_backend:
+        missing.append("sherpa-onnx (recommended) or faster-whisper")
 
     if missing:
         print("Missing dependencies:")

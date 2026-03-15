@@ -21,7 +21,7 @@ class Config:
     backend: str = "sherpa"  # whisper, sherpa (sherpa is ~30% faster for Russian)
 
     # Model settings
-    model_size: str = "giga-am-v3-ru"  # For Sherpa: giga-am-v3-ru (default), giga-am-v2-ru, giga-am-ru
+    model_size: str = "giga-am-v2-ru"  # For Sherpa: giga-am-v2-ru (default), giga-am-v3-ru, giga-am-ru
                                       # For Whisper: tiny, base, small, medium, large
                                       # For Podlodka: podlodka-turbo
     language: str = "ru"  # auto-detect or specific language code
@@ -98,12 +98,6 @@ class Config:
             try:
                 with open(config_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                # ALWAYS use "quality" as default (max quality)
-                # Also update backend and model to match quality profile
-                data["quality_profile"] = "quality"
-                quality_settings = QUALITY_PROFILES["quality"]
-                data["backend"] = quality_settings["backend"]
-                data["model_size"] = quality_settings["model_size"]
                 return cls(**data)
             except (json.JSONDecodeError, TypeError):
                 pass
@@ -226,7 +220,7 @@ PASTE_METHODS = {
 QUALITY_PROFILES = {
     "fast": {
         "backend": "sherpa",
-        "model_size": "giga-am-v3-ru",
+        "model_size": "giga-am-v2-ru",
         "vad_enabled": False,
         "vad_threshold": 0.5,
         "min_silence_duration_ms": 800,
@@ -235,7 +229,7 @@ QUALITY_PROFILES = {
     },
     "balanced": {
         "backend": "sherpa",
-        "model_size": "giga-am-v3-ru",
+        "model_size": "giga-am-v2-ru",
         "vad_enabled": True,
         "vad_threshold": 0.5,
         "min_silence_duration_ms": 800,
@@ -244,7 +238,7 @@ QUALITY_PROFILES = {
     },
     "quality": {
         "backend": "sherpa",
-        "model_size": "giga-am-v3-ru",
+        "model_size": "giga-am-v2-ru",
         "vad_enabled": True,
         "vad_threshold": 0.3,
         "min_silence_duration_ms": 500,
