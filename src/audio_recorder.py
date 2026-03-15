@@ -112,9 +112,9 @@ class AudioRecorder:
                     data_int16 = np.concatenate(processed_chunks)
                     data = data_int16.astype(np.float32) / 32767.0
                     data = data.reshape(-1, 1)  # Ensure (samples, channels) shape
-            except Exception:
+            except Exception as e:
                 # Fallback to original data if WebRTC fails
-                pass
+                print(f"[WARN] WebRTC processing failed: {e}")
 
         try:
             self._audio_queue.put_nowait(data)

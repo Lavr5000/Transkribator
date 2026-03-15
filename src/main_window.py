@@ -1604,7 +1604,7 @@ class MainWindow(QMainWindow):
                 self.status_label.setText("Скопировано!")
                 self.status_label.show()  # Показываем статус копирования
                 QTimer.singleShot(1500, self._restore_status_after_copy)
-            except:
+            except Exception:
                 pass
 
     def _restore_status_after_copy(self):
@@ -1957,7 +1957,7 @@ class MainWindow(QMainWindow):
         if self.config.auto_copy and CLIPBOARD_AVAILABLE:
             try:
                 pyperclip.copy(text)
-            except:
+            except Exception:
                 pass
 
         # Показываем всплывающую панель с текстом ВСЕГДА
@@ -2026,7 +2026,7 @@ class MainWindow(QMainWindow):
                 self.status_label.setText("Скопировано!")
                 self.status_label.show()  # Показываем статус копирования
                 QTimer.singleShot(1500, self._restore_status_after_copy)
-            except:
+            except Exception:
                 pass
 
     def _show_history(self):
@@ -2321,5 +2321,6 @@ def run():
     app = QApplication(sys.argv)
     app.setApplicationName("ГолосТекст")
     app.setQuitOnLastWindowClosed(False)
-    MainWindow().show()
+    window = MainWindow()
+    window.show()
     sys.exit(app.exec())

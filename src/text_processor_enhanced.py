@@ -222,7 +222,7 @@ class EnhancedTextProcessor:
             "многа": "много",
             "мал": "мало",
             "дел": "дела",
-            "ра": "раз",
+            # "ра" removed: prefix in compound words would be corrupted
 
             # Preposition errors (common ASR confusion)
             "неигр": "наиграть",
@@ -239,17 +239,17 @@ class EnhancedTextProcessor:
 
             # Verb ending mistakes (-т/-ть confusion)
             "делае": "делает",
-            "делать": "делает",
+            # "делать" removed: valid infinitive
             "говори": "говорит",
-            "говорить": "говорит",
+            # "говорить" removed: valid infinitive
             "смотри": "смотрит",
             "смотреть": "смотрит",
             "знае": "знает",
-            "знать": "знает",
+            # "знать" removed: valid infinitive
             "дума": "думает",
             "думат": "думает",
             "хоче": "хочет",
-            "хочешь": "хочет",
+            # "хочешь" removed: valid 2nd person form
             "може": "может",
             "можит": "может",
             "пиш": "пишет",
@@ -259,7 +259,6 @@ class EnhancedTextProcessor:
             "слыш": "слышит",
             "слышат": "слышит",
             "види": "видит",
-            "видит": "видит",
 
             # Reflexive verb errors (-ся/-сь)
             "находитс": "находится",
@@ -284,20 +283,16 @@ class EnhancedTextProcessor:
             # Past tense gender mismatches (context-dependent, basic rules)
             "сделалм": "сделала",
             "сделало": "сделала",
-            "пришло": "пришла",
-            "ушло": "ушла",
-            "сказало": "сказала",
-            "написало": "написала",
-            "прочитало": "прочитала",
-            "увидело": "увидела",
-            "дало": "дала",
-            "дало": "дала",
-            "сказало": "сказала",
-            "ушло": "ушла",
-            "пришло": "пришла",
-            "получило": "получила",
-            "прошло": "прошла",
-            "начало": "начала",
+            # "пришло" removed: valid neuter past tense
+            # "ушло" removed: valid neuter past tense
+            # "сказало" removed: valid neuter past tense
+            # "написало" removed: valid neuter past tense
+            # "прочитало" removed: valid neuter past tense
+            # "увидело" removed: valid neuter past tense
+            # "дало" removed: valid neuter past tense
+            # "получило" removed: valid neuter past tense
+            # "прошло" removed: valid neuter past tense
+            # "начало" removed: valid noun "beginning"
             "кончил": "кончила",
             "вышел": "вышла",
             "вошел": "вошла",
@@ -322,7 +317,7 @@ class EnhancedTextProcessor:
             "однакоо": "однако",
 
             # Number word errors
-            "одно": "один",
+            # "одно" removed: valid neuter form
             "трие": "три",
             "четыр": "четыре",
             "пят": "пять",
@@ -341,8 +336,8 @@ class EnhancedTextProcessor:
 
             # Common particle errors
             "ль": "ли",
-            "ж": "же",
-            "б": "бы",
+            # "ж" removed: letter in abbreviations would be corrupted
+            # "б" removed: letter in abbreviations would be corrupted
             "вед": "ведь",
             "даж": "даже",
             "уж": "уже",
@@ -469,12 +464,9 @@ class EnhancedTextProcessor:
 
     def _english_corrections(self):
         """Load English language error corrections."""
-        self.corrections = {
-            "their": "there",
-            "your": "you're",
-            "its": "it's",
-            "then": "than",
-        }
+        # Removed unconditional corrections ("their"->"there", "your"->"you're", etc.)
+        # These replace valid words without syntactic analysis
+        self.corrections = {}
 
         self.pattern_corrections = [
             (r'\s+', ' '),
