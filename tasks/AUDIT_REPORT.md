@@ -547,16 +547,16 @@ Same corrections exist in `src/text_processor.py:113-118`.
 | 1.4 | Fix silent transcription failures (BUG-5) | `sherpa_backend.py:397-398` | Added print + on_progress error callback | ✅ |
 | 1.5 | Fix whisper dependency check (BUG-8) | `main.py:47-59` | sherpa-onnx first, whisper optional, need at least one | ✅ |
 
-### Phase 2 — Quality Improvements (estimated 1 day)
+### Phase 2 — Quality Improvements (estimated 1 day) ✅ DONE
 
-| # | Task | File(s) | Impact |
-|---|------|---------|--------|
-| 2.1 | Remove dangerous English corrections (BUG-10) | `text_processor_enhanced.py:471-477`, `text_processor.py:112-119` | Delete or gate with syntax analysis |
-| 2.2 | Remove dangerous Russian corrections | `text_processor_enhanced.py` | Remove "делать"→"делает", "начало"→"начала", etc. |
-| 2.3 | Replace bare excepts with `except Exception:` (BUG-9) | `main_window.py:1607,1960,2029` | 3 lines changed |
-| 2.4 | Fix WebRTC silent fallback (BUG-6) | `audio_recorder.py:115-117` | Add logging when WebRTC fails |
-| 2.5 | Fix MainWindow() reference (BUG-7) | `main_window.py:2324` | `window = MainWindow(); window.show()` |
-| 2.6 | Add pyproject.toml: sherpa-onnx dependency (CODE-6) | `pyproject.toml:30-38` | Add sherpa-onnx, make faster-whisper optional |
+| # | Task | File(s) | Impact | Status |
+|---|------|---------|--------|--------|
+| 2.1 | Remove dangerous English corrections (BUG-10) | `text_processor_enhanced.py`, `text_processor.py` | Emptied `_english_corrections()` dict in both files | ✅ |
+| 2.2 | Remove dangerous Russian corrections | `text_processor_enhanced.py` | Removed "делать"→"делает", "говорить"→"говорит", "знать"→"знает", "хочешь"→"хочет", "одно"→"один", "пришло"→"пришла", "начало"→"начала", "ра"→"раз", "б"→"бы", "ж"→"же" and all neuter→feminine past tense | ✅ |
+| 2.3 | Replace bare excepts with `except Exception:` (BUG-9) | `main_window.py:1607,1960,2029` | 3 bare excepts fixed | ✅ |
+| 2.4 | Fix WebRTC silent fallback (BUG-6) | `audio_recorder.py:115-117` | Added `print(f"[WARN] WebRTC processing failed: {e}")` | ✅ |
+| 2.5 | Fix MainWindow() reference (BUG-7) | `main_window.py:2324` | `window = MainWindow(); window.show()` | ✅ |
+| 2.6 | Add pyproject.toml: sherpa-onnx dependency (CODE-6) | `pyproject.toml:30-38` | Added sherpa-onnx to deps, moved faster-whisper to `[whisper]` optional | ✅ |
 
 ### Phase 3 — Performance Optimization (estimated 2-3 days)
 

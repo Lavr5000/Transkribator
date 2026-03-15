@@ -110,14 +110,9 @@ class TextProcessor:
 
     def _english_corrections(self):
         """Load English language error corrections."""
-        self.corrections = {
-            # Common Whisper errors for English
-            "their": "there",
-            "your": "you're",
-            "its": "it's",
-            "then": "than",
-            # Add more as needed
-        }
+        # Removed unconditional corrections ("their"->"there", "your"->"you're", etc.)
+        # These replace valid words without syntactic analysis
+        self.corrections = {}
 
         self.pattern_corrections = [
             (r'\s+', ' '),
