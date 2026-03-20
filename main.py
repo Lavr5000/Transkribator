@@ -79,8 +79,39 @@ def check_dependencies():
     return True
 
 
+def _is_already_running() -> bool:
+    """Check if another instance is already running using a lock file."""
+    import tempfile, atexit
+    lock_path = os.path.join(tempfile.gettempdir(), "transkribator.lock")
+    try:
+        # Try to read PID from existing lock
+        if os.path.exists(lock_path):
+            with open(lock_path) as f:
+                old_pid = int(f.read().strip())
+            # Check if that process is still alive
+            import signal
+            try:
+                os.kill(old_pid, 0)  # signal 0 = check existence
+                return True  # Process alive — another instance running
+            except OSError:
+                pass  # Process dead — stale lock, we can take over
+
+        # Write our PID
+        with open(lock_path, "w") as f:
+            f.write(str(os.getpid()))
+        atexit.register(lambda: os.path.exists(lock_path) and os.unlink(lock_path))
+        return False
+    except Exception:
+        return False  # On error, allow launch
+
+
 def main():
     """Main entry point."""
+    # Single instance check
+    if _is_already_running():
+        print("Transkribator is already running.")
+        sys.exit(0)
+
     # Check dependencies
     if not check_dependencies():
         sys.exit(1)

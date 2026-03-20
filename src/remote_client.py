@@ -13,17 +13,25 @@ from typing import Optional
 import numpy as np
 import requests
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("transkribator")
 
 
 class RemoteTranscriptionClient:
     """Client for remote transcription with automatic fallback."""
 
     # Server endpoints (Tailscale VPN first, then internet)
-    SERVERS = [
+    _DEFAULT_SERVERS = [
         "http://100.102.178.110:8000",  # Tailscale IP (WIN-1FQKL540GRF) - IP updated 2026-01-23
         "http://elated-dhawan-remote.serveo.net:8000"  # Through serveo.net (backup)
     ]
+
+    @classmethod
+    def _get_servers(cls):
+        """Get server list from env var or defaults."""
+        env_servers = os.environ.get("TRANSKRIBATOR_REMOTE_SERVERS")
+        if env_servers:
+            return [s.strip() for s in env_servers.split(",") if s.strip()]
+        return cls._DEFAULT_SERVERS
 
     def __init__(
         self,
@@ -66,7 +74,7 @@ class RemoteTranscriptionClient:
             return self._last_check_result
 
         # Perform actual health check
-        for server_url in self.SERVERS:
+        for server_url in self._get_servers():
             try:
                 logger.debug(f"Checking server health: {server_url}")
                 response = self.session.get(

@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
-from config import WHISPER_MODELS, SHERPA_MODELS, PODLODKA_MODELS, LANGUAGES, BACKENDS, MOUSE_BUTTONS, PASTE_METHODS, QUALITY_PROFILES, MODEL_METADATA
+from config import WHISPER_MODELS, SHERPA_MODELS, PODLODKA_MODELS, GROQ_MODELS, LANGUAGES, BACKENDS, MOUSE_BUTTONS, PASTE_METHODS, QUALITY_PROFILES, MODEL_METADATA
 from widgets import COLORS, COLORS_HEX, DIALOG_STYLESHEET, DictionaryEntryDialog
 
 
@@ -114,9 +114,34 @@ class SettingsDialog(QDialog):
 
         scroll_layout.addWidget(quality_group)
 
+        # === Basic settings: auto_copy, auto_paste, sound ===
+        basic_group = QGroupBox("Основные")
+        basic_layout = QVBoxLayout(basic_group)
+
+        self.auto_copy_cb = QCheckBox("Авто-копирование")
+        self.auto_paste_cb = QCheckBox("Авто-вставка")
+        self.sound_feedback_cb = QCheckBox("Звуковой сигнал (старт/стоп)")
+
+        if self.config:
+            self.auto_copy_cb.setChecked(self.config.auto_copy)
+            self.auto_paste_cb.setChecked(self.config.auto_paste)
+            self.sound_feedback_cb.setChecked(self.config.sound_feedback)
+
+        basic_layout.addWidget(self.auto_copy_cb)
+        basic_layout.addWidget(self.auto_paste_cb)
+        basic_layout.addWidget(self.sound_feedback_cb)
+        scroll_layout.addWidget(basic_group)
+
+        # === Advanced settings (collapsed by default) ===
+        advanced_group = QGroupBox("Расширенные настройки")
+        advanced_group.setCheckable(True)
+        advanced_group.setChecked(False)  # Collapsed by default
+        advanced_layout = QVBoxLayout(advanced_group)
+        self._advanced_group = advanced_group
+
         # Info label
-        scroll_layout.addWidget(QLabel(f"Бэкенд: {self.config.backend if self.config else 'N/A'}"))
-        scroll_layout.addWidget(QLabel(f"Модель: {self.config.model_size if self.config else 'N/A'}"))
+        advanced_layout.addWidget(QLabel(f"Бэкенд: {self.config.backend if self.config else 'N/A'}"))
+        advanced_layout.addWidget(QLabel(f"Модель: {self.config.model_size if self.config else 'N/A'}"))
 
         # Backend combo
         backend_group = QGroupBox("Движок")
@@ -127,7 +152,7 @@ class SettingsDialog(QDialog):
         if self.config:
             self.backend_combo.setCurrentIndex(list(BACKENDS.keys()).index(self.config.backend))
         backend_layout.addWidget(self.backend_combo)
-        scroll_layout.addWidget(backend_group)
+        advanced_layout.addWidget(backend_group)
 
         # Model combo
         model_group = QGroupBox("Модель")
@@ -140,7 +165,7 @@ class SettingsDialog(QDialog):
         self.model_info_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 11px;")
         model_layout.addWidget(self.model_info_label)
 
-        scroll_layout.addWidget(model_group)
+        advanced_layout.addWidget(model_group)
 
         # Language combo
         lang_group = QGroupBox("Язык")
@@ -151,14 +176,11 @@ class SettingsDialog(QDialog):
         if self.config and self.config.language in LANGUAGES:
             self.lang_combo.setCurrentIndex(list(LANGUAGES.keys()).index(self.config.language))
         lang_layout.addWidget(self.lang_combo)
-        scroll_layout.addWidget(lang_group)
+        advanced_layout.addWidget(lang_group)
 
-        # Behavior group
+        # Behavior group (advanced — paste method, always_top, post_process)
         behavior_group = QGroupBox("Поведение")
         behavior_layout = QVBoxLayout(behavior_group)
-
-        self.auto_copy_cb = QCheckBox("Авто-копирование")
-        self.auto_paste_cb = QCheckBox("Авто-вставка")
 
         paste_method_label = QLabel("Метод вставки:")
         paste_method_label.setStyleSheet("margin-top: 5px;")
@@ -174,18 +196,14 @@ class SettingsDialog(QDialog):
         self.post_process_cb = QCheckBox("Пост-обработка")
 
         if self.config:
-            self.auto_copy_cb.setChecked(self.config.auto_copy)
-            self.auto_paste_cb.setChecked(self.config.auto_paste)
             self.always_top_cb.setChecked(self.config.always_on_top)
             self.post_process_cb.setChecked(self.config.enable_post_processing)
 
-        behavior_layout.addWidget(self.auto_copy_cb)
-        behavior_layout.addWidget(self.auto_paste_cb)
         behavior_layout.addWidget(paste_method_label)
         behavior_layout.addWidget(self.paste_method_combo)
         behavior_layout.addWidget(self.always_top_cb)
         behavior_layout.addWidget(self.post_process_cb)
-        scroll_layout.addWidget(behavior_group)
+        advanced_layout.addWidget(behavior_group)
 
         # Mouse button group
         mouse_group = QGroupBox("Кнопка мыши")
@@ -205,7 +223,7 @@ class SettingsDialog(QDialog):
             )
         mouse_layout.addWidget(self.mouse_button_combo)
 
-        scroll_layout.addWidget(mouse_group)
+        advanced_layout.addWidget(mouse_group)
 
         # VAD Settings group
         vad_group = QGroupBox("Голосовая активность (VAD)")
@@ -256,7 +274,25 @@ class SettingsDialog(QDialog):
         vad_reset_btn.clicked.connect(self._reset_vad_defaults)
         vad_layout.addWidget(vad_reset_btn)
 
-        scroll_layout.addWidget(vad_group)
+        advanced_layout.addWidget(vad_group)
+
+        # Auto-Stop group
+        auto_stop_group = QGroupBox("Автостоп при тишине")
+        auto_stop_layout = QVBoxLayout(auto_stop_group)
+
+        self.auto_stop_cb = QCheckBox("Автоматически останавливать запись при тишине")
+        self.auto_stop_cb.setToolTip("Запись прекратится если тишина длится дольше указанного времени")
+        auto_stop_layout.addWidget(self.auto_stop_cb)
+
+        auto_stop_layout.addSpacing(5)
+        auto_stop_layout.addWidget(QLabel("Время тишины (секунд):"))
+        self.auto_stop_slider = QSlider(Qt.Orientation.Horizontal)
+        self.auto_stop_slider.setRange(10, 100)  # 1.0 - 10.0 seconds (value / 10)
+        self.auto_stop_value = QLabel()
+        auto_stop_layout.addWidget(self.auto_stop_slider)
+        auto_stop_layout.addWidget(self.auto_stop_value)
+
+        advanced_layout.addWidget(auto_stop_group)
 
         # Noise Reduction group
         noise_group = QGroupBox("Шумоподавление")
@@ -294,8 +330,9 @@ class SettingsDialog(QDialog):
         noise_reset_btn.clicked.connect(self._reset_noise_defaults)
         noise_layout.addWidget(noise_reset_btn)
 
-        scroll_layout.addWidget(noise_group)
+        advanced_layout.addWidget(noise_group)
 
+        scroll_layout.addWidget(advanced_group)
         scroll_layout.addStretch()
         scroll.setWidget(content)
         layout.addWidget(scroll)
@@ -317,15 +354,47 @@ class SettingsDialog(QDialog):
             stats_layout.addWidget(self.stats_saved)
             layout.addWidget(stats)
 
+        # Search field
+        search_layout = QHBoxLayout()
+        search_label = QLabel("Поиск:")
+        self.history_search = QLineEdit()
+        self.history_search.setPlaceholderText("Поиск по тексту...")
+        self.history_search.textChanged.connect(self._filter_history)
+        search_layout.addWidget(search_label)
+        search_layout.addWidget(self.history_search)
+        layout.addLayout(search_layout)
+
+        # History table
         history_group = QGroupBox("История")
         history_layout = QVBoxLayout(history_group)
-        self.history_text = QTextEdit()
-        self.history_text.setReadOnly(True)
-        history_layout.addWidget(self.history_text)
+
+        self.history_table = QTableWidget()
+        self.history_table.setColumnCount(5)
+        self.history_table.setHorizontalHeaderLabels(["#", "Время", "Текст", "Слов", "Backend"])
+        self.history_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.history_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.history_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.history_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.history_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.history_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.history_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        history_layout.addWidget(self.history_table)
+
+        # Buttons row
+        btn_layout = QHBoxLayout()
+        copy_btn = QPushButton("Копировать")
+        copy_btn.clicked.connect(self._copy_history_entry)
+        btn_layout.addWidget(copy_btn)
+
+        export_btn = QPushButton("Экспорт")
+        export_btn.clicked.connect(self._export_history)
+        btn_layout.addWidget(export_btn)
 
         clear_btn = QPushButton("Очистить")
         clear_btn.clicked.connect(self._clear_history)
-        history_layout.addWidget(clear_btn)
+        btn_layout.addWidget(clear_btn)
+
+        history_layout.addLayout(btn_layout)
         layout.addWidget(history_group)
 
         self.tabs.addTab(tab, "История")
@@ -515,7 +584,7 @@ class SettingsDialog(QDialog):
         if not self.config:
             return
         backend = self.backend_combo.currentData() or self.config.backend
-        models = {"whisper": WHISPER_MODELS, "sherpa": SHERPA_MODELS, "podlodka-turbo": PODLODKA_MODELS}.get(backend, {})
+        models = {"whisper": WHISPER_MODELS, "sherpa": SHERPA_MODELS, "podlodka-turbo": PODLODKA_MODELS, "groq": GROQ_MODELS}.get(backend, {})
 
         sorted_models = sorted(models.items(), key=lambda x: MODEL_METADATA.get(x[0], {}).get("rtf", 1.0))
 
@@ -529,17 +598,55 @@ class SettingsDialog(QDialog):
         if self.config.model_size in models:
             self.model_combo.setCurrentIndex(list(models.keys()).index(self.config.model_size))
 
-    def _update_history_display(self):
+    def _update_history_display(self, entries=None):
         if not self.history_manager:
             return
-        history = self.history_manager.get_history()
-        if not history:
-            self.history_text.setPlainText("Пусто")
+        if entries is None:
+            entries = self.history_manager.get_history()
+        self.history_table.setRowCount(len(entries))
+        for i, e in enumerate(entries):
+            self.history_table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
+            self.history_table.setItem(i, 1, QTableWidgetItem(e.timestamp))
+            # Truncate long text for display
+            display_text = e.text[:80] + "..." if len(e.text) > 80 else e.text
+            item = QTableWidgetItem(display_text)
+            item.setToolTip(e.text)  # Full text on hover
+            self.history_table.setItem(i, 2, item)
+            self.history_table.setItem(i, 3, QTableWidgetItem(str(e.word_count)))
+            self.history_table.setItem(i, 4, QTableWidgetItem(e.backend))
+
+    def _filter_history(self, query: str):
+        if not self.history_manager:
             return
-        lines = []
-        for i, e in enumerate(history, 1):
-            lines.append(f"[{i}] {e.timestamp}\n{e.text}\n")
-        self.history_text.setPlainText("\n".join(lines))
+        entries = self.history_manager.search_history(query)
+        self._update_history_display(entries)
+
+    def _copy_history_entry(self):
+        row = self.history_table.currentRow()
+        if row < 0:
+            return
+        text_item = self.history_table.item(row, 2)
+        if text_item:
+            full_text = text_item.toolTip() or text_item.text()
+            try:
+                import pyperclip
+                pyperclip.copy(full_text)
+            except ImportError:
+                pass
+
+    def _export_history(self):
+        if not self.history_manager:
+            return
+        filepath, _ = QFileDialog.getSaveFileName(
+            self, "Экспорт истории", "", "Text Files (*.txt)"
+        )
+        if not filepath:
+            return
+        entries = self.history_manager.get_history()
+        with open(filepath, "w", encoding="utf-8") as f:
+            for i, e in enumerate(entries, 1):
+                f.write(f"[{i}] {e.timestamp} | {e.backend} | {e.word_count} слов\n")
+                f.write(f"{e.text}\n\n")
 
     def _clear_history(self):
         if self.history_manager:

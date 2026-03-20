@@ -5,11 +5,14 @@ Supports multiple speech recognition backends:
 - SherpaBackend: Sherpa-ONNX with GigaAM models (optimized for Russian)
 """
 import gc
+import logging
 import threading
 import time
 from pathlib import Path
 from typing import Callable, Optional, Tuple
 import numpy as np
+
+logger = logging.getLogger("transkribator")
 
 from text_processor import AdvancedTextProcessor
 
@@ -75,8 +78,12 @@ class Transcriber:
         # User dictionary for custom corrections
         self.user_dictionary = user_dictionary or []
 
+        # Fallback tracking
+        self.last_used_fallback = False
+
         self._backend = None
         self._lock = threading.Lock()
+        self._cancel_event = threading.Event()
 
         # Initialize text processor
         lang_code = language if language != "auto" else "ru"
@@ -138,16 +145,18 @@ class Transcriber:
         """
         with self._lock:
             # Unload current backend
+            old_backend = self.backend_name
             if self._backend:
                 try:
                     self._backend.unload_model()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("UNLOAD_FAILED | error=%s", e)
 
             # Update configuration
             self.backend_name = backend
             if model_size:
                 self.model_size = model_size
+            logger.info("BACKEND_SWITCH | %s → %s | model=%s", old_backend, backend, model_size or self.model_size)
 
             # Recreate text processor for new backend
             # Sherpa needs EnhancedTextProcessor (with punctuation)
@@ -169,6 +178,10 @@ class Transcriber:
             # Create new backend
             self._create_backend()
 
+    def cancel(self):
+        """Signal cancellation for long-running transcription."""
+        self._cancel_event.set()
+
     def transcribe(
         self,
         audio: np.ndarray,
@@ -184,23 +197,44 @@ class Transcriber:
         Returns:
             Tuple of (transcribed text, processing time in seconds)
         """
+        self._cancel_event.clear()
+
         if self._backend is None:
             self._create_backend()
+
+        audio_duration = len(audio) / sample_rate
+        logger.info("TRANSCRIBE_START | backend=%s | audio=%.1fs (%d samples) | sr=%d",
+                     self.backend_name, audio_duration, len(audio), sample_rate)
 
         start_time = time.time()
 
         try:
-            # Transcribe using backend
-            text, backend_time = self._backend.transcribe(audio, sample_rate)
+            # Transcribe using backend (pass cancel event for chunked processing)
+            text, backend_time = self._backend.transcribe(audio, sample_rate, cancel_event=self._cancel_event)
+
+            # Track if Groq fell back to Sherpa
+            self.last_used_fallback = getattr(self._backend, 'last_used_fallback', False)
+
+            # Check cancellation after transcription
+            if self._cancel_event.is_set():
+                logger.info("TRANSCRIBE_CANCELLED | backend=%s", self.backend_name)
+                return "", 0.0
 
             # Apply post-processing to improve text quality
             if self.enable_post_processing and self.text_processor:
                 text = self.text_processor.process(text)
 
             process_time = time.time() - start_time
+            logger.info("TRANSCRIBE_DONE | backend=%s | audio=%.1fs | elapsed=%.2fs (RTF=%.2f) | words=%d | \"%s\"",
+                         self.backend_name, audio_duration, process_time,
+                         process_time / audio_duration if audio_duration > 0 else 0,
+                         len(text.split()), text[:50])
             return text, process_time
 
         except Exception as e:
+            elapsed = time.time() - start_time
+            logger.error("TRANSCRIBE_FAILED | backend=%s | audio=%.1fs | elapsed=%.2fs | error=%s",
+                          self.backend_name, audio_duration, elapsed, e, exc_info=True)
             if self.on_progress:
                 self.on_progress(f"Error: {e}")
             return "", 0.0
@@ -223,12 +257,17 @@ class Transcriber:
 
     def load_model(self) -> bool:
         """Load the backend model."""
+        logger.info("MODEL_LOAD_START | backend=%s | model=%s", self.backend_name, self.model_size)
+        t0 = time.time()
         try:
             if self._backend:
                 self._backend.load_model()
+                logger.info("MODEL_LOAD_DONE | backend=%s | elapsed=%.2fs", self.backend_name, time.time() - t0)
                 return True
             return False
         except Exception as e:
+            logger.error("MODEL_LOAD_FAILED | backend=%s | elapsed=%.2fs | error=%s",
+                          self.backend_name, time.time() - t0, e, exc_info=True)
             return False
 
     def unload_model(self) -> None:

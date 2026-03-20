@@ -1,6 +1,8 @@
 """Configuration management for WhisperTyping."""
 import json
 import os
+import time
+import threading
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Optional
@@ -47,6 +49,10 @@ class Config:
     min_silence_duration_ms: int = 800  # Min silence to mark speech end (milliseconds)
     min_speech_duration_ms: int = 500  # Min speech to start detection (milliseconds)
 
+    # Auto-stop on silence
+    auto_stop_enabled: bool = False  # Auto-stop recording after silence
+    auto_stop_silence_sec: float = 2.0  # Seconds of silence before auto-stop
+
     # Hotkey settings
     hotkey: str = "ctrl+shift+space"  # Global hotkey to start/stop recording
 
@@ -66,6 +72,12 @@ class Config:
     # "clipboard" is recommended - it's faster and doesn't crash terminal apps like Claude Code
     paste_method: str = "clipboard"  # clipboard | type
     paste_delay: float = 0.15  # Delay before paste (seconds) - allows window focus to settle
+
+    # First run
+    first_run: bool = True  # Show onboarding tooltip on first launch
+
+    # Sound feedback
+    sound_feedback: bool = True  # Play beep on start/stop recording
 
     # UI settings
     always_on_top: bool = True
@@ -104,7 +116,23 @@ class Config:
         return cls()
 
     def save(self) -> None:
-        """Save configuration to file."""
+        """Save configuration to file (rate-limited to avoid excessive disk I/O)."""
+        now = time.time()
+        if hasattr(self, '_last_save_time') and now - self._last_save_time < 0.5:
+            if not getattr(self, '_deferred_pending', False):
+                self._deferred_pending = True
+                threading.Timer(1.0, self._deferred_flush).start()
+            return
+        self._write_to_disk()
+
+    def _deferred_flush(self):
+        """Flush deferred save to disk."""
+        self._deferred_pending = False
+        self._write_to_disk()
+
+    def _write_to_disk(self):
+        """Write config to disk immediately."""
+        self._last_save_time = time.time()
         config_path = self.get_config_path()
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(asdict(self), f, indent=2)
@@ -143,6 +171,7 @@ BACKENDS = {
     "whisper": "Whisper (OpenAI)",
     "sherpa": "Sherpa-ONNX (GigaAM Russian)",
     "podlodka-turbo": "Whisper-Podlodka-Turbo (Russian fine-tuned)",
+    "groq": "Groq Whisper (Cloud, fast)",
 }
 
 # Available Whisper models
@@ -165,6 +194,12 @@ SHERPA_MODELS = {
 # Available Podlodka-Turbo models
 PODLODKA_MODELS = {
     "podlodka-turbo": "Podlodka-Turbo (Russian fine-tuned, recommended)",
+}
+
+# Available Groq cloud models
+GROQ_MODELS = {
+    "whisper-large-v3-turbo": "Whisper Large V3 Turbo (fast, recommended)",
+    "whisper-large-v3": "Whisper Large V3 (most accurate)",
 }
 
 # Supported languages
@@ -263,4 +298,7 @@ MODEL_METADATA = {
     "giga-am-ru": {"ram_mb": 140, "rtf": 0.1, "description": "Русский (2024)"},
     # Podlodka model
     "podlodka-turbo": {"ram_mb": 1000, "rtf": 0.4, "description": "Ru fine-tuned"},
+    # Groq cloud models
+    "whisper-large-v3-turbo": {"ram_mb": 0, "rtf": 0.05, "description": "Groq Cloud (быстрый)"},
+    "whisper-large-v3": {"ram_mb": 0, "rtf": 0.1, "description": "Groq Cloud (точный)"},
 }

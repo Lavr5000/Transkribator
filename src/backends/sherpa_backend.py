@@ -1,4 +1,6 @@
 """Sherpa-ONNX backend implementation with GigaAM Russian models."""
+import gc
+import logging
 import os
 import sys
 import threading
@@ -8,6 +10,8 @@ from typing import Callable, Optional, Tuple
 import numpy as np
 
 from .base import BaseBackend
+
+logger = logging.getLogger("transkribator")
 
 try:
     import sherpa_onnx
@@ -177,7 +181,7 @@ class SherpaBackend(BaseBackend):
                     local_dir_use_symlinks=False,
                 )
             except Exception as e:
-                print(f"Failed to download VAD model: {e}")
+                logger.warning("VAD_DOWNLOAD_FAILED | %s", e)
                 # Return directory anyway - OfflineVad will fail gracefully
 
         return vad_dir
@@ -254,9 +258,9 @@ class SherpaBackend(BaseBackend):
                         min_silence_duration=self._min_silence_duration_ms / 1000.0,  # Convert to seconds
                         min_speech_duration=self._min_speech_duration_ms / 1000.0,
                     )
-                    print(f"VAD initialized: threshold={self._vad_threshold}")
+                    logger.debug("VAD_INIT | threshold=%.2f", self._vad_threshold)
                 except Exception as e:
-                    print(f"Failed to initialize VAD: {e}")
+                    logger.warning("VAD_INIT_FAILED | %s", e)
                     self._vad = None
 
         except Exception as e:
@@ -270,32 +274,48 @@ class SherpaBackend(BaseBackend):
         """Unload the model to free memory."""
         with self._lock:
             self._recognizer = None
+            gc.collect()
 
-    def _transcribe_chunks(self, audio: np.ndarray) -> str:
-        """Split long audio into 25s chunks and transcribe each independently."""
-        chunk_size = self.CHUNK_DURATION_SEC * self.CHUNK_SAMPLE_RATE  # 400 000 samples
-        texts = []
-        offset = 0
-        while offset < len(audio):
-            chunk = audio[offset: offset + chunk_size]
-            if len(chunk) < 1600:   # Skip chunks < 0.1s (noise/silence tail)
-                break
+    def _transcribe_single_chunk(self, chunk: np.ndarray, chunk_index: int) -> str:
+        """Transcribe a single audio chunk with 1 retry on failure."""
+        for attempt in range(2):
             try:
                 stream = self._recognizer.create_stream()
                 stream.accept_waveform(self.CHUNK_SAMPLE_RATE, chunk)
                 self._recognizer.decode_stream(stream)
-                chunk_text = stream.result.text.strip()
-                if chunk_text:
-                    texts.append(chunk_text)
-            except Exception:
-                pass  # Skip failed chunk, continue with next
+                return stream.result.text.strip()
+            except Exception as e:
+                if attempt == 0:
+                    logger.warning("SHERPA_CHUNK_RETRY | chunk=%d | error=%s", chunk_index, e)
+                else:
+                    logger.warning("SHERPA_CHUNK_FAILED | chunk=%d | error=%s", chunk_index, e)
+        return ""
+
+    def _transcribe_chunks(self, audio: np.ndarray, cancel_event=None) -> str:
+        """Split long audio into 25s chunks and transcribe each independently."""
+        chunk_size = self.CHUNK_DURATION_SEC * self.CHUNK_SAMPLE_RATE  # 400 000 samples
+        texts = []
+        offset = 0
+        chunk_index = 0
+        while offset < len(audio):
+            if cancel_event and cancel_event.is_set():
+                logger.info("SHERPA_CHUNKS_CANCELLED | after %d chunks", chunk_index)
+                break
+            chunk = audio[offset: offset + chunk_size]
+            if len(chunk) < 1600:   # Skip chunks < 0.1s (noise/silence tail)
+                break
+            chunk_text = self._transcribe_single_chunk(chunk, chunk_index)
+            if chunk_text:
+                texts.append(chunk_text)
             offset += chunk_size
+            chunk_index += 1
         return " ".join(texts)
 
     def transcribe(
         self,
         audio: np.ndarray,
-        sample_rate: int = 16000
+        sample_rate: int = 16000,
+        cancel_event=None
     ) -> Tuple[str, float]:
         """
         Transcribe audio to text.
@@ -309,6 +329,9 @@ class SherpaBackend(BaseBackend):
         """
         if self._recognizer is None:
             self.load_model()
+
+        audio_duration = len(audio) / sample_rate
+        logger.info("SHERPA_START | model=%s | audio=%.1fs", self.model_size, audio_duration)
 
         start_time = time.time()
 
@@ -370,7 +393,7 @@ class SherpaBackend(BaseBackend):
             # Route: chunk long audio to avoid ONNX crash
             audio_duration_sec = len(audio) / 16000.0
             if audio_duration_sec > self.CHUNK_THRESHOLD_SEC:
-                text = self._transcribe_chunks(audio)
+                text = self._transcribe_chunks(audio, cancel_event=cancel_event)
             else:
                 stream = self._recognizer.create_stream()
                 stream.accept_waveform(16000, audio)
@@ -378,11 +401,13 @@ class SherpaBackend(BaseBackend):
                 text = stream.result.text.strip()
 
             process_time = time.time() - start_time
+            num_chunks = len(audio) // (self.CHUNK_DURATION_SEC * 16000) + 1 if audio_duration > self.CHUNK_THRESHOLD_SEC else 1
+            logger.info("SHERPA_DONE | elapsed=%.2fs | chunks=%d | text_len=%d", process_time, num_chunks, len(text))
 
             return text, process_time
 
         except Exception as e:
-            print(f"[ERROR] Transcription failed: {e}")
+            logger.error("SHERPA_FAILED | model=%s | audio=%.1fs | %s", self.model_size, audio_duration, e, exc_info=True)
             if self.on_progress:
                 self.on_progress(f"Error: {e}")
             return "", 0.0

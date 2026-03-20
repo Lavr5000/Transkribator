@@ -55,7 +55,8 @@ class BaseBackend(ABC):
     def transcribe(
         self,
         audio: np.ndarray,
-        sample_rate: int = 16000
+        sample_rate: int = 16000,
+        cancel_event=None
     ) -> Tuple[str, float]:
         """
         Transcribe audio to text.
@@ -63,6 +64,7 @@ class BaseBackend(ABC):
         Args:
             audio: Audio data as numpy array (float32, normalized to [-1, 1])
             sample_rate: Sample rate in Hz (default: 16000)
+            cancel_event: Optional threading.Event to signal cancellation
 
         Returns:
             Tuple of (transcribed_text, processing_time_seconds)

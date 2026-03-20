@@ -1,10 +1,13 @@
 """Podlodka-Turbo backend implementation - Russian fine-tuned Whisper."""
 import gc
+import logging
 import threading
 import time
 from pathlib import Path
 from typing import Callable, Optional, Tuple
 import numpy as np
+
+logger = logging.getLogger("transkribator")
 
 from .base import BaseBackend
 
@@ -108,7 +111,7 @@ class PodlodkaTurboBackend(BaseBackend):
                     local_dir_use_symlinks=False,
                 )
             except Exception as e:
-                print(f"Failed to download VAD model: {e}")
+                logger.warning("PODLODKA_VAD_DOWNLOAD_FAILED | %s", e)
 
         return vad_dir
 
@@ -161,9 +164,9 @@ class PodlodkaTurboBackend(BaseBackend):
                         min_silence_duration=self._min_silence_duration_ms / 1000.0,
                         min_speech_duration=self._min_speech_duration_ms / 1000.0,
                     )
-                    print(f"PodlodkaBackend: VAD initialized")
+                    logger.debug("PODLODKA_VAD_INIT | OK")
                 except Exception as e:
-                    print(f"PodlodkaBackend: Failed to initialize VAD: {e}")
+                    logger.warning("PODLODKA_VAD_INIT_FAILED | %s", e)
                     self._vad = None
 
             if self.on_progress:
@@ -185,7 +188,7 @@ class PodlodkaTurboBackend(BaseBackend):
             try:
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
-            except:
+            except Exception:
                 pass
 
         if self.on_progress:
@@ -194,7 +197,8 @@ class PodlodkaTurboBackend(BaseBackend):
     def transcribe(
         self,
         audio: np.ndarray,
-        sample_rate: int = 16000
+        sample_rate: int = 16000,
+        cancel_event=None
     ) -> Tuple[str, float]:
         """
         Transcribe audio to text.
@@ -236,7 +240,7 @@ class PodlodkaTurboBackend(BaseBackend):
                 else:
                     return "", 0.0
             except Exception as e:
-                print(f"PodlodkaBackend: VAD filtering failed: {e}")
+                logger.warning("PODLODKA_VAD_FILTER_FAILED | %s", e)
                 # Continue with original audio on VAD failure
 
         try:
@@ -300,8 +304,7 @@ class PodlodkaTurboBackend(BaseBackend):
         except Exception as e:
             if self.on_progress:
                 self.on_progress(f"Podlodka-Turbo error: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error("PODLODKA_TRANSCRIBE_FAILED | %s", e, exc_info=True)
             return "", 0.0
 
     def is_model_loaded(self) -> bool:

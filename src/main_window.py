@@ -7,6 +7,12 @@ import logging.handlers
 import threading
 from typing import Optional
 
+try:
+    import winsound
+    WINSOUND_AVAILABLE = True
+except ImportError:
+    WINSOUND_AVAILABLE = False
+
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QLabel,
     QSystemTrayIcon, QMenu, QMessageBox,
@@ -42,7 +48,7 @@ _log_path = os.path.join(os.path.dirname(_log_dir), "debug.log")
 _handler = logging.handlers.RotatingFileHandler(
     _log_path, maxBytes=512_000, backupCount=2, encoding="utf-8"
 )
-_handler.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+_handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
 logger = logging.getLogger("transkribator")
 logger.setLevel(logging.DEBUG)
 logger.addHandler(_handler)
@@ -128,6 +134,7 @@ class HybridTranscriptionThread(QThread):
                     except concurrent.futures.TimeoutError:
                         # Local transcription took too long - cancel and try remote
                         future.cancel()
+                        self.transcriber.cancel()
                         logger.debug("Local transcription timeout (%.1fs)", self._local_timeout)
                         raise Exception("Local transcription timeout")
 
@@ -192,6 +199,11 @@ class MainWindow(QMainWindow):
             webrtc_enabled=self.config.webrtc_enabled,
             noise_suppression_level=self.config.noise_suppression_level,
         )
+        # Configure auto-stop
+        self.recorder.auto_stop_enabled = self.config.auto_stop_enabled
+        self.recorder.auto_stop_silence_sec = self.config.auto_stop_silence_sec
+        self.recorder.on_auto_stop = self._on_auto_stop
+
         self.transcriber = Transcriber(
             backend=self.config.backend,
             model_size=self.config.model_size,
@@ -233,6 +245,7 @@ class MainWindow(QMainWindow):
         self._last_text = ""
         self._hover = False
         self._shutting_down = False  # Флаг для безопасного завершения
+        self._starting = False  # Guard against double start press
 
         self._setup_ui()
         self._setup_tray()
@@ -250,6 +263,10 @@ class MainWindow(QMainWindow):
 
         # Preload model immediately (in background thread) to eliminate cold start
         QTimer.singleShot(100, self._load_model)
+
+        # Show onboarding tooltip on first run
+        if self.config.first_run:
+            QTimer.singleShot(500, self._show_onboarding)
 
     def _setup_ui(self):
         self.setWindowTitle("ГолосТекст")
@@ -286,6 +303,18 @@ class MainWindow(QMainWindow):
         self.status_label.setFixedWidth(85)  # Для "Готово", "Слушаю", "Обработка..."
         self.status_label.move(8, 35)  # Левый нижний угол
         self.status_label.hide()  # Скрыт при запуске, показывается при hover
+
+        # Hotkey hint label - shows hotkey in idle state with low opacity
+        hotkey_display = self.config.hotkey.replace("+", "+").upper()
+        self.hotkey_label = QLabel(hotkey_display, self.central)
+        self.hotkey_label.setStyleSheet(f"""
+            color: rgba(140, 160, 180, 128);
+            font-size: 9px;
+            font-weight: 400;
+            background: transparent;
+        """)
+        self.hotkey_label.setFixedWidth(120)
+        self.hotkey_label.move(8, 35)  # Same position as status_label
 
         # Timer label - справа снизу, на одной высоте со статусом
         self.timer_label = QLabel("", self.central)
@@ -347,7 +376,7 @@ class MainWindow(QMainWindow):
         self.copy_btn.clicked.connect(self._copy_last)
 
         self._corner_btns = [self.copy_btn, self.settings_btn, self.close_btn]
-        self._set_corner_opacity(0.0)
+        self._set_corner_opacity(0.15)  # Slightly visible in idle state
 
         # Recording timer
         self._rec_timer = QTimer()
@@ -359,18 +388,21 @@ class MainWindow(QMainWindow):
 
     def enterEvent(self, event):
         self._hover = True
-        self._set_corner_opacity(0.7)
+        self._set_corner_opacity(0.9)
         # Показываем статус "Готово" при наведении
         if self.status_label.text() == "Готово":
             self.status_label.show()
+            self.hotkey_label.hide()
         super().enterEvent(event)
 
     def leaveEvent(self, event):
         self._hover = False
-        self._set_corner_opacity(0.0)
+        self._set_corner_opacity(0.15)
         # Скрываем статус "Готово" когда мышка ушла
         if self.status_label.text() == "Готово":
             self.status_label.hide()
+            if not self._recording and not self._processing:
+                self.hotkey_label.show()
         super().leaveEvent(event)
 
     def _setup_tray(self):
@@ -399,7 +431,10 @@ class MainWindow(QMainWindow):
         """Создаём всплывающую панель для отображения текста."""
         self._text_popup = TextPopup()
         self._text_popup.copy_requested.connect(self._copy_from_popup)
+        self._text_popup.text_accepted.connect(self._on_popup_accepted)
+        self._text_popup.text_discarded.connect(self._on_popup_discarded)
         self._text_popup.hide()
+        self._last_audio = None  # Cached audio for retry
 
     def _copy_from_popup(self):
         """Копировать текст из всплывающей панели."""
@@ -421,11 +456,57 @@ class MainWindow(QMainWindow):
             if not self._hover:
                 self.status_label.hide()
 
+    def _on_popup_accepted(self, text: str):
+        """User accepted (or timeout auto-accepted) text from popup."""
+        if not text:
+            return
+        # Update clipboard with possibly edited text
+        if CLIPBOARD_AVAILABLE:
+            try:
+                pyperclip.copy(text)
+            except Exception:
+                pass
+        # Auto-paste if enabled
+        if self.config.auto_paste:
+            QTimer.singleShot(100, lambda: self._type(text))
+
+    def _on_popup_discarded(self):
+        """User discarded transcription from popup."""
+        self.status_label.setText("Отменено")
+        self.status_label.show()
+        QTimer.singleShot(1500, self._restore_status_after_copy)
+
+    def _retry_transcription(self):
+        """Retry transcription with cached audio."""
+        if self._last_audio is None:
+            return
+        self._text_popup.hide()
+        self._processing = True
+        self.status_label.setText("Обработка...")
+        self.status_label.show()
+        self._transcription_start = time.time()
+        self._cleanup_thread()
+        self._thread = HybridTranscriptionThread(
+            self.remote_client,
+            self.transcriber,
+            self._last_audio,
+            self.config.sample_rate,
+            enable_remote=getattr(self.config, 'enable_remote_fallback', False)
+        )
+        self._thread.transcription_done.connect(self._done)
+        self._thread.transcription_error.connect(self._error)
+        self._thread.finished.connect(self._on_thread_finished)
+        self._thread.start()
+        logger.debug("_retry_transcription(): retry started")
+
     def _show_text_popup(self, text: str):
         """Показать всплывающую панель с текстом сверху окна."""
         if not text:
             return
 
+        # Show audio quality warning if detected
+        warning = getattr(self, '_audio_quality_warning', '')
+        self._text_popup.set_header(warning)
         self._text_popup.set_text(text)
         # Позиционируем сверху главного окна
         main_pos = self.pos()
@@ -444,6 +525,39 @@ class MainWindow(QMainWindow):
         # Также Raise для гарантии что окно сверху
         self._text_popup.raise_()
 
+    def _on_auto_stop(self):
+        """Called from audio thread when silence exceeds auto_stop threshold."""
+        try:
+            if not self._shutting_down and self._recording:
+                self._request_toggle.emit()
+        except RuntimeError:
+            pass
+
+    def _show_onboarding(self):
+        """Show first-run onboarding tooltip."""
+        hotkey = self.config.hotkey.replace("+", "+").upper()
+        tip = f"Нажмите {hotkey} или кнопку микрофона для записи.\nНастройки — при наведении справа."
+        self._text_popup.set_header("Добро пожаловать!")
+        self._show_text_popup(tip)
+        self._text_popup._text_edit.setReadOnly(True)
+        self._text_popup._accept_btn.hide()
+        self._text_popup._copy_btn.hide()
+        self._text_popup.show_with_timeout(8000)
+        self.config.first_run = False
+        self.config.save()
+
+    _NOTIFY_WAV = r"C:\Windows\Media\Windows Notify System Generic.wav"
+
+    def _play_sound(self):
+        """Play soft Windows notification .wav file (non-blocking, no PC-speaker fallback)."""
+        if not WINSOUND_AVAILABLE or not self.config.sound_feedback:
+            return
+        winsound.PlaySound(None, winsound.SND_PURGE)  # Cancel previous to prevent overlap
+        winsound.PlaySound(
+            self._NOTIFY_WAV,
+            winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT
+        )
+
     def _connect_signals(self):
         self.status_update.connect(self._set_status)
         self.audio_level_update.connect(self._set_level)
@@ -452,7 +566,11 @@ class MainWindow(QMainWindow):
         self._request_toggle.connect(self._toggle_recording, Qt.ConnectionType.QueuedConnection)
 
     def _load_model(self):
-        threading.Thread(target=self.transcriber.load_model, daemon=True).start()
+        def _load_with_status():
+            self.status_update.emit("Загрузка модели...")
+            success = self.transcriber.load_model()
+            self.status_update.emit("Готово" if success else "Ошибка загрузки")
+        threading.Thread(target=_load_with_status, daemon=True).start()
 
     def _cleanup_thread(self):
         """Safely cleanup the transcription thread."""
@@ -516,7 +634,7 @@ class MainWindow(QMainWindow):
 
                 # VAD level bar removed - no color changes needed
         except (RuntimeError, AttributeError) as e:
-            print(f"[VAD UI ERROR] {e}")  # DEBUG
+            logger.debug("VAD_UI_ERROR | %s", e)
 
     def _on_progress(self, msg):
         self.status_update.emit(msg)
@@ -543,6 +661,10 @@ class MainWindow(QMainWindow):
             logger.debug("_toggle_recording BLOCKED by _processing flag")
             return
 
+        if self._starting:
+            logger.debug("_toggle_recording BLOCKED by _starting flag")
+            return
+
         # Debounce: блокируем только ПОВТОРНЫЙ запуск, не остановку!
         if not self._recording:
             current_time = time.time()
@@ -560,14 +682,17 @@ class MainWindow(QMainWindow):
 
     def _start(self):
         logger.debug("_start() called, _recording=%s, _processing=%s", self._recording, self._processing)
+        self._starting = True
 
         # Reset VAD level bar to silence state (if exists)
         if self.vad_level_bar:
             self.vad_level_bar.setValue(0)
 
+        self._play_sound()  # Play BEFORE opening audio stream to avoid device conflict
         if self.recorder.start():
             self._recording = True
             self._rec_start = time.time()
+            self.hotkey_label.hide()
             self.status_label.setText("Слушаю")
             self.status_label.show()  # Показываем статус при записи
             self.timer_label.setText("0.0с")
@@ -581,8 +706,10 @@ class MainWindow(QMainWindow):
             self.cancel_btn.show()
             self.close_btn.hide()
 
+            self._starting = False
             logger.debug("_start() SUCCESS: recording started")
         else:
+            self._starting = False
             logger.debug("_start() FAILED: recorder.start() returned False")
 
     def _stop(self):
@@ -596,6 +723,15 @@ class MainWindow(QMainWindow):
         self._rec_duration = time.time() - self._rec_start
 
         audio = self.recorder.stop()
+        self._last_audio = audio  # Cache for retry
+        QTimer.singleShot(200, self._play_sound)  # 200ms for WASAPI to fully release device
+
+        # Check audio quality and prepare warning header
+        self._audio_quality_warning = ""
+        if self.recorder.clipping_detected:
+            self._audio_quality_warning = "⚠ Обнаружено искажение (перегрузка)"
+        elif self.recorder.low_signal:
+            self._audio_quality_warning = "⚠ Слабый сигнал микрофона"
 
         self.timer_label.hide()
         self.record_btn.set_recording(False)
@@ -715,10 +851,15 @@ class MainWindow(QMainWindow):
                 self.mode_label.setText("🌐")
                 self.mode_label.setToolTip("Удаленная транскрибация")
                 logger.debug("Mode: REMOTE (is_remote=True)")
-            else:  # Local transcription (fallback)
+            elif getattr(self.transcriber, 'last_used_fallback', False):
+                # Groq backend fell back to Sherpa
+                self.mode_label.setText("⚡")
+                self.mode_label.setToolTip("Sherpa (Groq fallback)")
+                logger.debug("Mode: FALLBACK (Groq→Sherpa)")
+            else:  # Local transcription
                 self.mode_label.setText("🏠")
                 self.mode_label.setToolTip("Локальная транскрибация")
-                logger.debug("Mode: LOCAL (is_remote=False, fallback)")
+                logger.debug("Mode: LOCAL (is_remote=False)")
             self.mode_label.show()
 
             logger.debug("Mode label shown: %s", self.mode_label.text())
@@ -745,12 +886,9 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
-        # Показываем всплывающую панель с текстом ВСЕГДА
+        # Show popup — auto-paste is now handled via popup's text_accepted signal
+        # If user doesn't interact within timeout, popup auto-accepts (backward compat)
         self._show_text_popup(text)
-
-        # Авто-вставка текста если включено
-        if self.config.auto_paste:
-            QTimer.singleShot(100, lambda: self._type(text))
 
         logger.debug("_done() finished, _processing=%s", self._processing)
 
@@ -759,6 +897,9 @@ class MainWindow(QMainWindow):
         if not self._recording:
             self.timer_label.hide()
             self.mode_label.hide()
+            # Restore hotkey hint when idle
+            if not self.status_label.isVisible():
+                self.hotkey_label.show()
 
     def _error(self, err):
         # Check if we're shutting down
@@ -766,14 +907,45 @@ class MainWindow(QMainWindow):
             return
 
         self._processing = False  # Разблокируем
+
+        # Map error to user-friendly message
+        err_str = str(err).lower()
+        if "timeout" in err_str or "timed out" in err_str:
+            user_msg = "Превышено время ожидания"
+        elif "connection" in err_str or "network" in err_str or "unreachable" in err_str:
+            user_msg = "Сервер недоступен"
+        elif "model" in err_str or "recognizer" in err_str or "onnx" in err_str:
+            user_msg = "Ошибка модели"
+        elif "audio" in err_str or "microphone" in err_str:
+            user_msg = "Ошибка аудио"
+        else:
+            user_msg = "Ошибка транскрибации"
+
         self.status_label.setText("Ошибка")
-        self.status_label.show()  # Показываем статус ошибки
+        self.status_label.show()
+
+        # Show error in popup with retry button
+        self._show_error_popup(user_msg)
 
         # Возвращаем кнопку закрытия при ошибке
         self.cancel_btn.hide()
         self.close_btn.show()
 
-        logger.debug("_error() called: %s", err)
+        logger.debug("_error() called: %s -> %s", err, user_msg)
+
+    def _show_error_popup(self, message: str):
+        """Show error message in TextPopup with retry button."""
+        retry_cb = self._retry_transcription if self._last_audio is not None else None
+        self._text_popup.show_error(message, retry_callback=retry_cb)
+        main_pos = self.pos()
+        popup_height = self._text_popup.height()
+        screen_geometry = QApplication.screenAt(main_pos).geometry()
+        popup_y = main_pos.y() - popup_height - 10
+        if popup_y < screen_geometry.top() + 50:
+            popup_y = main_pos.y() + self.height() + 10
+        self._text_popup.move(main_pos.x(), popup_y)
+        self._text_popup.show_with_timeout(8000)
+        self._text_popup.raise_()
 
     def _type(self, text):
         """Paste or type text based on config.paste_method."""
@@ -786,7 +958,7 @@ class MainWindow(QMainWindow):
                 # Legacy method: type characters one by one (can crash Claude Code!)
                 type_text(text)
         except Exception as e:
-            print(f"Paste/type error: {e}")
+            logger.warning("PASTE_TYPE_ERROR | %s", e)
 
     def _set_status(self, msg):
         self.status_label.setText(msg)
@@ -832,13 +1004,17 @@ class MainWindow(QMainWindow):
                 # Connect backend change to update models
                 self._settings.backend_combo.currentIndexChanged.connect(self._backend_changed)
 
+                # Init auto-stop controls
+                self._init_auto_stop_controls()
+
+                # Connect sound feedback checkbox
+                self._settings.sound_feedback_cb.toggled.connect(self._sound_feedback_changed)
+
             self._settings.move(self.pos().x(), self.pos().y() + self.height() + 10)
             self._settings.show()
             self._settings.raise_()
         except Exception as e:
-            print(f"[ERROR] _show_settings failed: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error("SHOW_SETTINGS_FAILED | %s", e, exc_info=True)
             QMessageBox.information(self, "Ошибка", f"Не удалось открыть настройки:\n{e}")
 
     def _backend_changed(self):
@@ -846,7 +1022,7 @@ class MainWindow(QMainWindow):
         if bid != self.config.backend:
             self.config.backend = bid
             self._settings._update_model_options()
-            default = {"whisper": "base", "sherpa": "giga-am-v3-ru", "podlodka-turbo": "podlodka-turbo"}.get(bid, "base")
+            default = {"whisper": "base", "sherpa": "giga-am-v3-ru", "podlodka-turbo": "podlodka-turbo", "groq": "whisper-large-v3-turbo"}.get(bid, "base")
             self.config.model_size = default
             self.config.save()
             self.transcriber.switch_backend(bid, default)
@@ -941,11 +1117,9 @@ class MainWindow(QMainWindow):
                     # Update model combo (will refresh based on backend)
                     self._settings._update_model_options()
 
-                print(f"[INFO] Quality profile changed to: {profile}")
+                logger.info("QUALITY_PROFILE_CHANGED | %s", profile)
         except Exception as e:
-            print(f"[ERROR] _quality_profile_changed failed: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error("QUALITY_PROFILE_CHANGE_FAILED | %s", e, exc_info=True)
 
     def _init_vad_controls(self):
         """Initialize VAD controls from config values."""
@@ -1043,6 +1217,32 @@ class MainWindow(QMainWindow):
         self._settings.noise_level_slider.setValue(2)
         self._update_noise_status()
 
+    def _init_auto_stop_controls(self):
+        """Initialize auto-stop controls from config values."""
+        self._settings.auto_stop_cb.setChecked(self.config.auto_stop_enabled)
+        slider_val = int(self.config.auto_stop_silence_sec * 10)
+        self._settings.auto_stop_slider.setValue(slider_val)
+        self._settings.auto_stop_value.setText(f"{self.config.auto_stop_silence_sec:.1f}с")
+
+        self._settings.auto_stop_cb.toggled.connect(self._auto_stop_enabled_changed)
+        self._settings.auto_stop_slider.valueChanged.connect(self._auto_stop_silence_changed)
+
+    def _sound_feedback_changed(self, checked: bool):
+        self.config.sound_feedback = checked
+        self.config.save()
+
+    def _auto_stop_enabled_changed(self, checked: bool):
+        self.config.auto_stop_enabled = checked
+        self.config.save()
+        self.recorder.auto_stop_enabled = checked
+
+    def _auto_stop_silence_changed(self, value: int):
+        sec = value / 10.0
+        self.config.auto_stop_silence_sec = sec
+        self.config.save()
+        self.recorder.auto_stop_silence_sec = sec
+        self._settings.auto_stop_value.setText(f"{sec:.1f}с")
+
     def _on_mouse_setting_changed(self, value=None):
         """Обновить настройку мыши и перезапустить обработчик."""
         # Update config from UI
@@ -1090,6 +1290,12 @@ class MainWindow(QMainWindow):
 
         # Cleanup transcription thread
         self._cleanup_thread()
+
+        # Unload model to free memory
+        try:
+            self.transcriber.unload_model()
+        except Exception:
+            pass
 
         self.hotkey_manager.unregister()
         self.mouse_handler.stop()

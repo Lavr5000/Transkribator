@@ -186,7 +186,8 @@ class WhisperBackend(BaseBackend):
     def transcribe(
         self,
         audio: np.ndarray,
-        sample_rate: int = 16000
+        sample_rate: int = 16000,
+        cancel_event=None
     ) -> Tuple[str, float]:
         """
         Transcribe audio to text.

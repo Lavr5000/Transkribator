@@ -1,11 +1,14 @@
 """Audio recording module for WhisperTyping."""
 import io
+import logging
 import queue
 import threading
 import tempfile
 from pathlib import Path
 from typing import Callable, Optional
 import numpy as np
+
+logger = logging.getLogger("transkribator")
 
 try:
     import sounddevice as sd
@@ -44,6 +47,7 @@ class AudioRecorder:
         mic_boost: float = 1.0,  # Software gain (DEPRECATED - only used when webrtc_enabled=False)
         webrtc_enabled: bool = True,
         noise_suppression_level: int = 2,
+        auto_gain_dbfs: int = 3,
     ):
         self.sample_rate = sample_rate
         self.channels = channels
@@ -56,17 +60,31 @@ class AudioRecorder:
 
         self._recording = False
         self._shutting_down = False  # Flag to prevent callbacks during shutdown
-        self._audio_queue: queue.Queue = queue.Queue()
+        self._audio_queue: queue.Queue = queue.Queue(maxsize=500)
         self._audio_data: list = []
         self._stream: Optional[sd.InputStream] = None
         self._lock = threading.Lock()
         self._collect_thread: Optional[threading.Thread] = None
 
+        # Audio quality tracking
+        self.clipping_detected = False  # Peak > 0.95
+        self.low_signal = False  # RMS < 0.005 for > 2 seconds
+        self._low_signal_frames = 0  # Counter for consecutive low-signal frames
+        self._low_signal_threshold = 0.005
+        self._clipping_threshold = 0.95
+
+        # Auto-stop on silence
+        self.auto_stop_enabled = False
+        self.auto_stop_silence_sec = 2.0
+        self.on_auto_stop: Optional[Callable[[], None]] = None
+        self._silence_frames = 0
+        self._silence_threshold = 0.01  # RMS below this = silence
+
         # Initialize WebRTC processor if enabled
         if self.webrtc_enabled:
             try:
                 self._webrtc_processor = AudioProcessor(
-                    auto_gain_dbfs=3,  # Target -16 dBFS (will be configured in 02-02)
+                    auto_gain_dbfs=auto_gain_dbfs,
                     noise_suppression_level=self.noise_suppression_level,
                 )
             except Exception:
@@ -80,7 +98,7 @@ class AudioRecorder:
             return
 
         if status:
-            print(f"Audio status: {status}")
+            logger.debug("AUDIO_STATUS | %s", status)
 
         # Copy audio data
         data = indata.copy()
@@ -114,7 +132,7 @@ class AudioRecorder:
                     data = data.reshape(-1, 1)  # Ensure (samples, channels) shape
             except Exception as e:
                 # Fallback to original data if WebRTC fails
-                print(f"[WARN] WebRTC processing failed: {e}")
+                logger.warning("WEBRTC_PROCESSING_FAILED | %s", e)
 
         try:
             self._audio_queue.put_nowait(data)
@@ -122,17 +140,42 @@ class AudioRecorder:
             pass  # Drop frame if queue is full
 
         # Calculate audio level for visualization (use cleaned audio)
-        if self.on_level_update:
-            try:
-                level = float(np.abs(data).mean())
-                self.on_level_update(level)
-            except Exception:
-                pass
+        try:
+            peak = float(np.abs(data).max())
+            rms = float(np.sqrt(np.mean(data ** 2)))
+
+            # Track audio quality
+            if peak > self._clipping_threshold:
+                self.clipping_detected = True
+            if rms < self._low_signal_threshold:
+                self._low_signal_frames += 1
+                # ~2 sec of low signal (callback fires ~100 times/sec at 16kHz/160 samples)
+                frames_per_sec = self.sample_rate / max(len(data), 1)
+                if self._low_signal_frames > frames_per_sec * 2:
+                    self.low_signal = True
+            else:
+                self._low_signal_frames = 0
+
+            # Auto-stop on silence
+            if self.auto_stop_enabled and self.on_auto_stop:
+                if rms < self._silence_threshold:
+                    self._silence_frames += 1
+                    frames_per_sec = self.sample_rate / max(len(data), 1)
+                    if self._silence_frames > frames_per_sec * self.auto_stop_silence_sec:
+                        self.on_auto_stop()
+                        self._silence_frames = 0  # Reset to avoid repeated triggers
+                else:
+                    self._silence_frames = 0
+
+            if self.on_level_update:
+                self.on_level_update(rms)
+        except Exception:
+            pass
 
     def start(self) -> bool:
         """Start recording audio."""
         if not AUDIO_AVAILABLE:
-            print("Audio libraries not available")
+            logger.error("AUDIO_LIBS_NOT_AVAILABLE")
             return False
 
         with self._lock:
@@ -143,8 +186,14 @@ class AudioRecorder:
                 # Reset state - ALWAYS reset shutting_down flag
                 # This ensures on_level_update callback works even after previous errors
                 self._audio_data = []
-                self._audio_queue = queue.Queue()
+                self._audio_queue = queue.Queue(maxsize=500)
                 self._shutting_down = False
+
+                # Reset audio quality tracking
+                self.clipping_detected = False
+                self.low_signal = False
+                self._low_signal_frames = 0
+                self._silence_frames = 0
 
                 # Ensure previous collect thread is stopped
                 if self._collect_thread is not None and self._collect_thread.is_alive():
@@ -171,22 +220,33 @@ class AudioRecorder:
 
                 return True
             except Exception as e:
-                print(f"Failed to start recording: {e}")
+                logger.error("RECORDING_START_FAILED | %s", e)
                 # Ensure shutting_down is reset even on error
                 self._shutting_down = False
                 return False
 
     def _collect_audio(self):
-        """Collect audio data from queue."""
-        while self._recording and not self._shutting_down:
+        """Collect audio data from queue. Sentinel (None) signals clean exit."""
+        while True:
             try:
                 data = self._audio_queue.get(timeout=0.1)
-                if not self._shutting_down:
-                    self._audio_data.append(data)
+                if data is None:
+                    break  # Sentinel received — drain remaining and exit
+                self._audio_data.append(data)
             except queue.Empty:
+                if not self._recording:
+                    break  # Fallback: exit if recording stopped without sentinel
                 continue
             except Exception:
                 break  # Exit on any error
+        # Drain remaining items after sentinel
+        while not self._audio_queue.empty():
+            try:
+                data = self._audio_queue.get_nowait()
+                if data is not None:
+                    self._audio_data.append(data)
+            except queue.Empty:
+                break
 
     def stop(self) -> Optional[np.ndarray]:
         """Stop recording and return audio data."""
@@ -207,17 +267,13 @@ class AudioRecorder:
                     pass  # Ignore errors during cleanup
                 self._stream = None
 
-            # Wait for collect thread
+            # Signal collect thread to drain and exit
+            self._audio_queue.put(None)
+
+            # Wait for collect thread (it drains the queue itself)
             if self._collect_thread is not None and self._collect_thread.is_alive():
                 self._collect_thread.join(timeout=2.0)
             self._collect_thread = None
-
-            # Drain remaining queue
-            while not self._audio_queue.empty():
-                try:
-                    self._audio_data.append(self._audio_queue.get_nowait())
-                except queue.Empty:
-                    break
 
             # Reset shutdown flag for next recording
             self._shutting_down = False
