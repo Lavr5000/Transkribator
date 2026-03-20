@@ -10,12 +10,14 @@ from .base import BaseBackend
 from .whisper_backend import WhisperBackend
 from .sherpa_backend import SherpaBackend
 from .podlodka_turbo_backend import PodlodkaTurboBackend
+from .groq_backend import GroqBackend
 
 __all__ = [
     "BaseBackend",
     "WhisperBackend",
     "SherpaBackend",
     "PodlodkaTurboBackend",
+    "GroqBackend",
 ]
 
 # Backend registry for dynamic loading
@@ -23,6 +25,7 @@ BACKENDS = {
     "whisper": WhisperBackend,
     "sherpa": SherpaBackend,
     "podlodka-turbo": PodlodkaTurboBackend,
+    "groq": GroqBackend,
 }
 
 def get_backend(backend_name: str) -> type[BaseBackend]:

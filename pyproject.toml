@@ -42,6 +42,9 @@ dependencies = [
 whisper = [
     "faster-whisper>=1.0.0",
 ]
+groq = [
+    "groq>=0.4.0",
+]
 gpu = [
     "torch>=2.0.0",
     "nvidia-cudnn-cu12>=8.9.0",

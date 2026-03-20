@@ -102,6 +102,16 @@ class HistoryManager:
         self._history.clear()
         self._save_history()
 
+    def search_history(self, query: str) -> List[TranscriptionEntry]:
+        """Search history entries by text content."""
+        if not query:
+            return self.get_history()
+        query_lower = query.lower()
+        return [
+            entry for entry in reversed(self._history)
+            if query_lower in entry.text.lower()
+        ]
+
     def get_stats(self) -> dict:
         """Get statistics about history."""
         total_words = sum(entry.word_count for entry in self._history)

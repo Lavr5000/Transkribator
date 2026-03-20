@@ -4,7 +4,7 @@ import webbrowser
 
 from PyQt6.QtWidgets import (
     QPushButton, QLabel, QDialog, QVBoxLayout, QHBoxLayout,
-    QWidget, QLineEdit, QCheckBox, QMessageBox,
+    QWidget, QLineEdit, QCheckBox, QMessageBox, QTextEdit,
 )
 from PyQt6.QtCore import Qt, QTimer, QPoint, QPointF, QRectF, pyqtSignal
 from PyQt6.QtGui import (
@@ -28,7 +28,7 @@ COLORS = {
     'accent_secondary': (0, 200, 255),
     'accent_glow': (100, 220, 255),
     'text_primary': (245, 248, 255),
-    'text_secondary': (140, 160, 180),
+    'text_secondary': (180, 195, 215),
     'success': (10, 185, 129),
     'border': (25, 40, 65),
 }
@@ -41,7 +41,7 @@ COLORS_HEX = {
     'accent_secondary': '#00C8FF',
     'accent_glow': '#64DCFF',
     'text_primary': '#F5F8FF',
-    'text_secondary': '#8CA0B4',
+    'text_secondary': '#B4C3D7',
 }
 
 COMPACT_HEIGHT = 52
@@ -493,17 +493,21 @@ class GradientWidget(QWidget):
 
 
 class TextPopup(QWidget):
-    """Floating transcription text panel - appears above for 5 seconds."""
+    """Floating transcription text panel with editable text and action buttons."""
 
     copy_requested = pyqtSignal()
+    text_accepted = pyqtSignal(str)
+    text_discarded = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._text = ""
+        self._user_interacted = False
+        self._header_text = ""  # Optional header (e.g. error/warning)
         self._setup_ui()
 
         self._hide_timer = QTimer()
-        self._hide_timer.timeout.connect(self.hide)
+        self._hide_timer.timeout.connect(self._on_timeout)
         self._hide_timer.setSingleShot(True)
 
     def _setup_ui(self):
@@ -514,8 +518,120 @@ class TextPopup(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedWidth(COMPACT_WIDTH)
-        self.setMinimumHeight(60)
-        self.setMaximumHeight(120)
+        self.setMinimumHeight(80)
+        self.setMaximumHeight(200)
+
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(8, 6, 8, 6)
+        main_layout.setSpacing(4)
+
+        # Header label (for errors/warnings, hidden by default)
+        self._header_label = QLabel("")
+        self._header_label.setStyleSheet(f"""
+            color: #FFB347;
+            font-size: 9px;
+            font-weight: 500;
+            background: transparent;
+        """)
+        self._header_label.hide()
+        main_layout.addWidget(self._header_label)
+
+        # Editable text area
+        self._text_edit = QTextEdit()
+        self._text_edit.setStyleSheet(f"""
+            QTextEdit {{
+                background: rgba(15, 25, 40, 200);
+                color: #{COLORS_HEX['text_primary']};
+                border: 1px solid rgba(0, 200, 255, 80);
+                border-radius: 6px;
+                font-size: 10pt;
+                padding: 4px 6px;
+                selection-background-color: rgba(0, 120, 255, 120);
+            }}
+        """)
+        self._text_edit.setMinimumHeight(40)
+        self._text_edit.setMaximumHeight(120)
+        self._text_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._text_edit.textChanged.connect(self._on_user_interact)
+        main_layout.addWidget(self._text_edit)
+
+        # Action buttons row
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(4)
+
+        btn_style = f"""
+            QPushButton {{
+                background: rgba(25, 40, 65, 220);
+                color: #{COLORS_HEX['text_primary']};
+                border: 1px solid rgba(0, 200, 255, 100);
+                border-radius: 4px;
+                font-size: 9px;
+                font-weight: 500;
+                padding: 3px 8px;
+                min-height: 20px;
+            }}
+            QPushButton:hover {{
+                background: rgba(0, 120, 255, 150);
+                border-color: rgba(0, 200, 255, 200);
+            }}
+        """
+
+        self._accept_btn = QPushButton("Вставить")
+        self._accept_btn.setStyleSheet(btn_style.replace(
+            "rgba(25, 40, 65, 220)", "rgba(0, 100, 200, 180)"
+        ))
+        self._accept_btn.clicked.connect(self._on_accept)
+        btn_layout.addWidget(self._accept_btn)
+
+        self._copy_btn = QPushButton("Копировать")
+        self._copy_btn.setStyleSheet(btn_style)
+        self._copy_btn.clicked.connect(self._on_copy)
+        btn_layout.addWidget(self._copy_btn)
+
+        self._discard_btn = QPushButton("Отмена")
+        self._discard_btn.setStyleSheet(btn_style)
+        self._discard_btn.clicked.connect(self._on_discard)
+        btn_layout.addWidget(self._discard_btn)
+
+        # Retry button (hidden by default, shown on errors)
+        self._retry_btn = QPushButton("Повторить")
+        self._retry_btn.setStyleSheet(btn_style.replace(
+            "rgba(25, 40, 65, 220)", "rgba(180, 80, 0, 180)"
+        ))
+        self._retry_btn.hide()
+        btn_layout.addWidget(self._retry_btn)
+
+        main_layout.addWidget(QWidget())  # spacer
+        main_layout.addLayout(btn_layout)
+
+    def _on_user_interact(self):
+        """User started editing — stop auto-hide timer."""
+        if not self._user_interacted:
+            self._user_interacted = True
+            self._hide_timer.stop()
+
+    def _on_timeout(self):
+        """Timer expired without user interaction — auto-accept (backward compat)."""
+        if not self._user_interacted:
+            self.text_accepted.emit(self._text_edit.toPlainText().strip())
+        self.hide()
+
+    def _on_accept(self):
+        """User clicked Accept — emit text and hide."""
+        self._hide_timer.stop()
+        self.text_accepted.emit(self._text_edit.toPlainText().strip())
+        self.hide()
+
+    def _on_copy(self):
+        """User clicked Copy — copy to clipboard only."""
+        self._hide_timer.stop()
+        self.copy_requested.emit()
+
+    def _on_discard(self):
+        """User clicked Discard — emit discard and hide."""
+        self._hide_timer.stop()
+        self.text_discarded.emit()
+        self.hide()
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -530,46 +646,67 @@ class TextPopup(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(self.rect(), 12, 12)
 
-        if self._text:
-            painter.setPen(QPen(QColor(*COLORS['text_primary'], 230)))
-            font = painter.font()
-            font.setPointSize(10)
-            painter.setFont(font)
-
-            text_rect = self.rect().adjusted(12, 8, -40, -8)
-            painter.drawText(text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextWordWrap, self._text)
-
-        copy_btn_x = self.width() - 30
-        copy_btn_y = (self.height() - 18) // 2
-
-        painter.setPen(QPen(QColor(*COLORS['accent_secondary'], 200), 1.5))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRoundedRect(QRectF(copy_btn_x, copy_btn_y + 2, 8, 10), 1, 1)
-        painter.drawRoundedRect(QRectF(copy_btn_x + 4, copy_btn_y, 8, 10), 1, 1)
-
     def set_text(self, text: str):
         self._text = text
+        self._user_interacted = False
+        self._text_edit.blockSignals(True)
+        self._text_edit.setPlainText(text)
+        self._text_edit.blockSignals(False)
 
-        font_metrics = self.fontMetrics()
-        text_width = COMPACT_WIDTH - 52
-        lines = max(1, len(text) // 40 + 1)
-        height = min(120, max(60, 30 + lines * 20))
-        self.setFixedHeight(height)
+        # Auto-size based on text length
+        lines = max(1, min(6, len(text) // 40 + 1))
+        text_height = max(40, min(120, 20 + lines * 18))
+        btn_height = 32
+        header_height = 18 if self._header_text else 0
+        total = text_height + btn_height + header_height + 20  # margins
+        self.setFixedHeight(min(200, max(80, total)))
 
         self.update()
 
+    def set_header(self, header: str):
+        """Set optional header text (for warnings/errors)."""
+        self._header_text = header
+        if header:
+            self._header_label.setText(header)
+            self._header_label.show()
+        else:
+            self._header_label.hide()
+
     def get_text(self) -> str:
-        return self._text
+        return self._text_edit.toPlainText().strip()
+
+    def show_error(self, message: str, retry_callback=None):
+        """Show error message with optional retry button."""
+        self._text_edit.setPlainText(message)
+        self._text_edit.setReadOnly(True)
+        self._accept_btn.hide()
+        self._copy_btn.hide()
+        if retry_callback:
+            self._retry_btn.show()
+            try:
+                self._retry_btn.clicked.disconnect()
+            except TypeError:
+                pass
+            self._retry_btn.clicked.connect(retry_callback)
+            self._retry_btn.clicked.connect(self.hide)
+        self.set_text(message)
+
+    def _reset_mode(self):
+        """Reset to normal editable mode."""
+        self._text_edit.setReadOnly(False)
+        self._accept_btn.show()
+        self._copy_btn.show()
+        self._retry_btn.hide()
+        self._header_label.hide()
+        self._header_text = ""
 
     def show_with_timeout(self, timeout_ms: int = 5000):
+        self._reset_mode()
+        self._user_interacted = False
         self._hide_timer.stop()
         self.show()
         self._hide_timer.start(timeout_ms)
 
     def mousePressEvent(self, event):
-        copy_btn_x = self.width() - 35
-        if event.pos().x() >= copy_btn_x:
-            self.copy_requested.emit()
-        else:
-            self._hide_timer.stop()
-            self.hide()
+        # Let child widgets handle clicks normally
+        super().mousePressEvent(event)

@@ -1,6 +1,9 @@
 """Enhanced text post-processing with punctuation restoration for Sherpa-ONNX."""
+import logging
 import re
 from typing import Dict, List, Tuple, Optional
+
+logger = logging.getLogger("transkribator")
 
 from text_processor import TextProcessor
 
@@ -9,7 +12,7 @@ try:
     PUNCTUATION_AVAILABLE = True
 except ImportError:
     PUNCTUATION_AVAILABLE = False
-    print("[WARNING] deepmultilingualpunctuation not installed. Install with: pip install deepmultilingualpunctuation")
+    logger.info("PUNCTUATION_MODEL_NOT_AVAILABLE | install deepmultilingualpunctuation")
 
 # Import phonetic corrections
 try:
@@ -18,7 +21,7 @@ try:
 except ImportError:
     PHONETICS_AVAILABLE = False
     PhoneticCorrector = None
-    print("[WARNING] phonetics module not available")
+    logger.info("PHONETICS_MODULE_NOT_AVAILABLE")
 
 # Import morphological corrections
 try:
@@ -27,7 +30,7 @@ try:
 except ImportError:
     MORPHOLOGY_AVAILABLE = False
     MorphologyCorrector = None
-    print("[WARNING] morphology module not available")
+    logger.info("MORPHOLOGY_MODULE_NOT_AVAILABLE")
 
 # Import proper noun corrections
 try:
@@ -36,7 +39,7 @@ try:
 except ImportError:
     PROPER_NOUNS_AVAILABLE = False
     ProperNounDict = None
-    print("[WARNING] proper_nouns module not available")
+    logger.info("PROPER_NOUNS_MODULE_NOT_AVAILABLE")
 
 
 class EnhancedTextProcessor(TextProcessor):
@@ -72,22 +75,12 @@ class EnhancedTextProcessor(TextProcessor):
         # Punctuation model will be loaded lazily on first use
         self.punctuation_model = None
 
-        # Initialize components after backend configuration
-        # (enable_phonetics, enable_morphology, enable_proper_nouns are set by _configure_for_backend)
-        if self.enable_phonetics:
-            self.phonetic_corrector = PhoneticCorrector(enable_validation=True)
-        else:
-            self.phonetic_corrector = None
-
-        if self.enable_morphology:
-            self.morphology_corrector = MorphologyCorrector()
-        else:
-            self.morphology_corrector = None
-
-        if self.enable_proper_nouns:
-            self.proper_nouns = ProperNounDict()
-        else:
-            self.proper_nouns = None
+        # Lazy-init: components created on first process() call to avoid
+        # ~200ms pymorphy2 startup cost at application launch
+        self.phonetic_corrector = None
+        self.morphology_corrector = None
+        self.proper_nouns = None
+        self._components_initialized = False
 
     def _configure_for_backend(self, enable_phonetics: bool, enable_morphology: bool, enable_proper_nouns: bool):
         """Configure processing flags based on backend type.
@@ -481,6 +474,21 @@ class EnhancedTextProcessor(TextProcessor):
                 pattern = re.compile(re.escape(wrong), re.IGNORECASE)
             self._compiled_patterns.append((pattern, correct))
 
+    def _ensure_components(self):
+        """Lazy-init phonetic, morphology, and proper noun components on first use."""
+        if self._components_initialized:
+            return
+        self._components_initialized = True
+
+        if self.enable_phonetics and PhoneticCorrector is not None:
+            self.phonetic_corrector = PhoneticCorrector(enable_validation=True)
+
+        if self.enable_morphology and MorphologyCorrector is not None:
+            self.morphology_corrector = MorphologyCorrector()
+
+        if self.enable_proper_nouns and ProperNounDict is not None:
+            self.proper_nouns = ProperNounDict()
+
     def process(self, text: str) -> str:
         """
         Apply all post-processing improvements to text.
@@ -493,6 +501,8 @@ class EnhancedTextProcessor(TextProcessor):
         """
         if not text or not self.enable_corrections:
             return text
+
+        self._ensure_components()
 
         # Step 1: Fix common errors
         text = self._fix_errors(text)
@@ -619,11 +629,11 @@ class EnhancedTextProcessor(TextProcessor):
         # Lazy load punctuation model on first use
         if self.punctuation_model is None:
             try:
-                print("[INFO] Loading punctuation model...")
+                logger.info("PUNCTUATION_MODEL_LOADING")
                 self.punctuation_model = PunctuationModel()
-                print("[INFO] Punctuation model loaded")
+                logger.info("PUNCTUATION_MODEL_LOADED")
             except Exception as e:
-                print(f"[WARNING] Failed to load punctuation model: {e}")
+                logger.warning("PUNCTUATION_MODEL_LOAD_FAILED | %s", e)
                 self.punctuation_model = None
                 return text
 
@@ -632,7 +642,7 @@ class EnhancedTextProcessor(TextProcessor):
             result = self.punctuation_model.restore_punctuation(text)
             return result
         except Exception as e:
-            print(f"[WARNING] Punctuation restoration failed: {e}")
+            logger.warning("PUNCTUATION_RESTORE_FAILED | %s", e)
             return text
 
     def _fix_punctuation(self, text: str) -> str:
