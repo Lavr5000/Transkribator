@@ -466,9 +466,7 @@ class MainWindow(QMainWindow):
                 pyperclip.copy(text)
             except Exception:
                 pass
-        # Auto-paste if enabled
-        if self.config.auto_paste:
-            QTimer.singleShot(100, lambda: self._type(text))
+        # Auto-paste already handled in _done() immediately after transcription
 
     def _on_popup_discarded(self):
         """User discarded transcription from popup."""
@@ -886,8 +884,9 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
-        # Show popup — auto-paste is now handled via popup's text_accepted signal
-        # If user doesn't interact within timeout, popup auto-accepts (backward compat)
+        # Auto-paste immediately, then show popup for reference/editing
+        if self.config.auto_paste:
+            QTimer.singleShot(100, lambda: self._type(text))
         self._show_text_popup(text)
 
         logger.debug("_done() finished, _processing=%s", self._processing)
