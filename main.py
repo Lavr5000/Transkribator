@@ -15,8 +15,20 @@ Or after installation:
 import sys
 import os
 
-# Add src to path
+# Add src to path — must be before importing crash_reporter
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+
+# Install CrashReporter early — before any native library imports
+from crash_reporter import CrashReporter
+crash_reporter = CrashReporter()
+crash_reporter.install()
+
+# Retry unsent Telegram notifications from previous crashes
+try:
+    from notifier import TelegramNotifier
+    TelegramNotifier(crash_dir=crash_reporter.crash_dir).send_unsent()
+except Exception:
+    pass
 
 
 def check_dependencies():
@@ -107,10 +119,12 @@ def _is_already_running() -> bool:
 
 def main():
     """Main entry point."""
-    # Single instance check
-    if _is_already_running():
-        print("Transkribator is already running.")
-        sys.exit(0)
+    # When launched via watchdog, skip single-instance check
+    # (watchdog ensures only one instance runs)
+    if "--watchdog" not in sys.argv:
+        if _is_already_running():
+            print("Transkribator is already running.")
+            sys.exit(0)
 
     # Check dependencies
     if not check_dependencies():
@@ -118,7 +132,14 @@ def main():
 
     # Import and run
     from src.main_window import run
-    run()
+    try:
+        exit_code = run() or 0
+        sys.exit(exit_code)
+    except SystemExit:
+        raise  # don't intercept sys.exit()
+    except Exception:
+        # excepthook already wrote the crash report
+        sys.exit(1)
 
 
 if __name__ == "__main__":

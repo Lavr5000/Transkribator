@@ -225,6 +225,8 @@ class SherpaBackend(BaseBackend):
                     tokens=str(tokens_file),
                     num_threads=self.num_threads,
                     sample_rate=16000,
+                    feature_dim=80,
+                    decoding_method="greedy_search",
                     debug=False,
                 )
             else:
@@ -252,13 +254,29 @@ class SherpaBackend(BaseBackend):
             if self._vad_enabled:
                 try:
                     vad_dir = self._get_vad_model_dir()
-                    self._vad = sherpa_onnx.OfflineVad(
-                        model_dir=str(vad_dir),
-                        threshold=self._vad_threshold,
-                        min_silence_duration=self._min_silence_duration_ms / 1000.0,  # Convert to seconds
-                        min_speech_duration=self._min_speech_duration_ms / 1000.0,
-                    )
-                    logger.debug("VAD_INIT | threshold=%.2f", self._vad_threshold)
+                    # Find the VAD model file
+                    vad_model_path = None
+                    for name in ["silero_vad.onnx", "v4.onnx", "model.onnx"]:
+                        candidate = vad_dir / name
+                        if candidate.exists():
+                            vad_model_path = candidate
+                            break
+                    if vad_model_path is None:
+                        logger.warning("VAD_MODEL_NOT_FOUND | dir=%s", vad_dir)
+                    else:
+                        silero_config = sherpa_onnx.SileroVadModelConfig(
+                            model=str(vad_model_path),
+                            threshold=self._vad_threshold,
+                            min_silence_duration=self._min_silence_duration_ms / 1000.0,
+                            min_speech_duration=self._min_speech_duration_ms / 1000.0,
+                        )
+                        vad_config = sherpa_onnx.VadModelConfig(
+                            silero_vad=silero_config,
+                            sample_rate=16000,
+                            num_threads=1,
+                        )
+                        self._vad = sherpa_onnx.VadModel.create(vad_config)
+                        logger.debug("VAD_INIT | threshold=%.2f | model=%s", self._vad_threshold, vad_model_path.name)
                 except Exception as e:
                     logger.warning("VAD_INIT_FAILED | %s", e)
                     self._vad = None
@@ -343,6 +361,11 @@ class SherpaBackend(BaseBackend):
             if len(audio.shape) > 1:
                 audio = audio.mean(axis=1)
 
+            # Pad with 200ms silence at start — CTC models need a clean onset
+            # to properly align the first token (avoids dropping first 1-2 words)
+            pad_samples = int(0.2 * 16000)  # 200ms = 3200 samples
+            audio = np.concatenate([np.zeros(pad_samples, dtype=np.float32), audio])
+
             # Resample if necessary (Sherpa-ONNX expects 16kHz)
             if sample_rate != 16000:
                 try:
@@ -360,35 +383,30 @@ class SherpaBackend(BaseBackend):
 
             # Apply VAD to filter silence if enabled
             if self._vad_enabled and self._vad is not None:
-                vad_stream = self._vad.create_stream()
-                vad_stream.accept_waveform(16000, audio)
-
-                # Flush to process remaining audio
-                self._vad.compute(vad_stream)
-
-                # Get speech segments
-                segments = vad_stream.segments
-
-                if segments:
-                    # Concatenate only speech segments (remove silence)
-                    speech_segments = []
-                    for seg in segments:
-                        start_sample = int(seg.start * 16000)
-                        end_sample = int(seg.end * 16000)
-                        # Ensure indices are within bounds
-                        start_sample = max(0, start_sample)
-                        end_sample = min(len(audio), end_sample)
-                        if end_sample > start_sample:
-                            speech_segments.append(audio[start_sample:end_sample])
-
-                    if speech_segments:
-                        audio = np.concatenate(speech_segments)
+                window_size = self._vad.window_size()
+                speech_windows = []
+                has_speech = False
+                for i in range(0, len(audio), window_size):
+                    window = audio[i:i + window_size]
+                    if len(window) < window_size:
+                        # Pad last window for VAD check
+                        padded = np.zeros(window_size, dtype=np.float32)
+                        padded[:len(window)] = window
+                        is_speech = self._vad.is_speech(padded.tolist())
                     else:
-                        # No speech detected
-                        return "", 0.0
-                else:
-                    # No speech segments detected
+                        is_speech = self._vad.is_speech(window.tolist())
+                    if is_speech:
+                        has_speech = True
+                        speech_windows.append(audio[i:min(i + window_size, len(audio))])
+
+                if has_speech and speech_windows:
+                    audio = np.concatenate(speech_windows)
+                    logger.debug("VAD_FILTER | kept %d/%d windows", len(speech_windows),
+                                 len(audio) // window_size + 1)
+                elif not has_speech:
+                    logger.debug("VAD_NO_SPEECH | audio=%.1fs", len(audio) / 16000.0)
                     return "", 0.0
+                self._vad.reset()
 
             # Route: chunk long audio to avoid ONNX crash
             audio_duration_sec = len(audio) / 16000.0

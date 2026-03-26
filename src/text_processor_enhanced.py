@@ -209,14 +209,11 @@ class EnhancedTextProcessor(TextProcessor):
             "здравствуйт": "здравствуйте",
             "пожалуйст": "пожалуйста",
             "пожалу": "пожалуйста",
-            "хорош": "хорошо",
             "плох": "плохо",
             "очен": "очень",
             "очнь": "очень",
             "мног": "много",
             "многа": "много",
-            "мал": "мало",
-            "дел": "дела",
             # "ра" removed: prefix in compound words would be corrupted
 
             # Preposition errors (common ASR confusion)
@@ -226,34 +223,19 @@ class EnhancedTextProcessor(TextProcessor):
             "вообщем": "вообще",
             "вобще": "вообще",
             "сво": "свои",
-            "свое": "свои",
             "соо": "свои",
             "ото": "от",
             "дл": "для",
             "длл": "для",
 
             # Verb ending mistakes (-т/-ть confusion)
+            # Only fix clearly broken truncations, NOT valid imperatives/infinitives
             "делае": "делает",
-            # "делать" removed: valid infinitive
-            "говори": "говорит",
-            # "говорить" removed: valid infinitive
-            "смотри": "смотрит",
-            "смотреть": "смотрит",
-            "знае": "знает",
-            # "знать" removed: valid infinitive
-            "дума": "думает",
             "думат": "думает",
-            "хоче": "хочет",
-            # "хочешь" removed: valid 2nd person form
-            "може": "может",
             "можит": "может",
-            "пиш": "пишет",
             "писат": "пишет",
-            "чита": "читает",
             "читат": "читает",
-            "слыш": "слышит",
             "слышат": "слышит",
-            "види": "видит",
 
             # Reflexive verb errors (-ся/-сь)
             "находитс": "находится",
@@ -275,25 +257,8 @@ class EnhancedTextProcessor(TextProcessor):
             "получис": "получится",
             "получитс": "получится",
 
-            # Past tense gender mismatches (context-dependent, basic rules)
-            "сделалм": "сделала",
-            "сделало": "сделала",
-            # "пришло" removed: valid neuter past tense
-            # "ушло" removed: valid neuter past tense
-            # "сказало" removed: valid neuter past tense
-            # "написало" removed: valid neuter past tense
-            # "прочитало" removed: valid neuter past tense
-            # "увидело" removed: valid neuter past tense
-            # "дало" removed: valid neuter past tense
-            # "получило" removed: valid neuter past tense
-            # "прошло" removed: valid neuter past tense
-            # "начало" removed: valid noun "beginning"
-            "кончил": "кончила",
-            "вышел": "вышла",
-            "вошел": "вошла",
-            "пришел": "пришла",
-            "ушел": "ушла",
-            "пришел": "пришла",
+            # Past tense typos (only clear typos, NOT gender forcing)
+            "сделалм": "сделал",
 
             # Adjective-noun gender agreement
             "большой семья": "большая семья",
@@ -335,10 +300,8 @@ class EnhancedTextProcessor(TextProcessor):
             # "б" removed: letter in abbreviations would be corrupted
             "вед": "ведь",
             "даж": "даже",
-            "уж": "уже",
             "лиш": "лишь",
             "тольк": "только",
-            "прост": "просто",
             "простоо": "просто",
 
             # Common negation errors
@@ -373,9 +336,6 @@ class EnhancedTextProcessor(TextProcessor):
 
         # Pattern-based corrections (regex)
         self.pattern_corrections = [
-            # Fix "А" → "От" at start (common Whisper error)
-            (r'^А (\w+)', lambda m: f'От {m.group(1)}'),
-
             # Fix multiple spaces
             (r'\s+', ' '),
 
@@ -516,7 +476,7 @@ class EnhancedTextProcessor(TextProcessor):
             text = self._fix_morphology(text)
 
         # Step 4: Add punctuation (for CTC models like Sherpa)
-        if self.enable_punctuation and self.punctuation_model:
+        if self.enable_punctuation:
             text = self._add_punctuation(text)
 
         # Step 5: Fix punctuation placement
