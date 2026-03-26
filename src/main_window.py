@@ -25,6 +25,9 @@ from PyQt6 import sip
 from config import Config, MODEL_METADATA
 from audio_recorder import AudioRecorder
 from transcriber import Transcriber, get_available_backends
+from crash_reporter import get_reporter
+from notifier import TelegramNotifier
+from quality_monitor import QualityMonitor
 from hotkeys import HotkeyManager, type_text, safe_paste_text, paste_from_clipboard
 from history_manager import HistoryManager
 from mouse_handler import MouseButtonHandler
@@ -223,6 +226,7 @@ class MainWindow(QMainWindow):
 
         self.hotkey_manager = HotkeyManager(on_hotkey=self._on_hotkey)
         self.history_manager = HistoryManager(max_entries=50)
+        self._quality_monitor = QualityMonitor(TelegramNotifier())
 
         # Initialize remote transcription client
         self.remote_client = RemoteTranscriptionClient()
@@ -876,6 +880,12 @@ class MainWindow(QMainWindow):
 
         self.config.update_stats(len(text.split()), self._rec_duration)
         self.history_manager.add_entry(text, duration, self.config.backend, self.config.model_size)
+        self._quality_monitor.record_result(
+            text_len=len(text),
+            audio_duration=self._rec_duration,
+            backend=self.config.backend,
+            model=self.config.model_size,
+        )
 
         # Авто-копирование в буфер обмена
         if self.config.auto_copy and CLIPBOARD_AVAILABLE:
@@ -931,6 +941,12 @@ class MainWindow(QMainWindow):
         self.close_btn.show()
 
         logger.debug("_error() called: %s -> %s", err, user_msg)
+        self._quality_monitor.record_result(
+            text_len=0,
+            audio_duration=0,
+            backend=self.config.backend,
+            model=self.config.model_size,
+        )
 
     def _show_error_popup(self, message: str):
         """Show error message in TextPopup with retry button."""
@@ -1009,6 +1025,13 @@ class MainWindow(QMainWindow):
                 # Connect sound feedback checkbox
                 self._settings.sound_feedback_cb.toggled.connect(self._sound_feedback_changed)
 
+                # Connect mouse button settings
+                self._settings.enable_mouse_button_cb.toggled.connect(self._on_mouse_setting_changed)
+                self._settings.mouse_button_combo.currentIndexChanged.connect(self._on_mouse_setting_changed)
+
+                # Connect model selection
+                self._settings.model_combo.currentIndexChanged.connect(self._model_changed)
+
             self._settings.move(self.pos().x(), self.pos().y() + self.height() + 10)
             self._settings.show()
             self._settings.raise_()
@@ -1019,12 +1042,32 @@ class MainWindow(QMainWindow):
     def _backend_changed(self):
         bid = self._settings.backend_combo.currentData()
         if bid != self.config.backend:
-            self.config.backend = bid
-            self._settings._update_model_options()
-            default = {"whisper": "base", "sherpa": "giga-am-v3-ru", "podlodka-turbo": "podlodka-turbo", "groq": "whisper-large-v3-turbo"}.get(bid, "base")
-            self.config.model_size = default
-            self.config.save()
-            self.transcriber.switch_backend(bid, default)
+            old_backend = self.config.backend
+            old_model = self.config.model_size
+            cr = get_reporter()
+            if cr:
+                cr.set_context("BACKEND_SWITCH", backend=bid, previous_backend=old_backend)
+            try:
+                self.config.backend = bid
+                self._settings.model_combo.blockSignals(True)
+                self._settings._update_model_options()
+                self._settings.model_combo.blockSignals(False)
+                default = {"whisper": "base", "sherpa": "giga-am-v3-ru", "podlodka-turbo": "podlodka-turbo", "groq": "whisper-large-v3-turbo"}.get(bid, "base")
+                self.config.model_size = default
+                self.config.save()
+                self.transcriber.switch_backend(bid, default)
+                self._load_model()
+                self._update_model_info_label()
+            except Exception as e:
+                self._settings.model_combo.blockSignals(False)
+                logger.error("BACKEND_SWITCH_FAILED | %s", e, exc_info=True)
+                self.config.backend = old_backend
+                self.config.model_size = old_model
+                self.config.save()
+                self._settings.model_combo.blockSignals(True)
+                self._settings._update_model_options()
+                self._settings.model_combo.blockSignals(False)
+                self.status_update.emit(f"Ошибка смены бэкенда: {e}")
 
     def _model_changed(self):
         mid = self._settings.model_combo.currentData()
@@ -1048,10 +1091,18 @@ class MainWindow(QMainWindow):
                         self._settings.model_combo.setCurrentIndex(idx)
                     return
 
-            self.config.model_size = mid
-            self.config.save()
-            self.transcriber.switch_backend(self.config.backend, mid)
-            self._update_model_info_label()
+            cr = get_reporter()
+            if cr:
+                cr.set_context("MODEL_SWITCH", backend=self.config.backend, model=mid)
+            try:
+                self.config.model_size = mid
+                self.config.save()
+                self.transcriber.switch_backend(self.config.backend, mid)
+                self._load_model()
+                self._update_model_info_label()
+            except Exception as e:
+                logger.error("MODEL_SWITCH_FAILED | %s", e, exc_info=True)
+                self.status_update.emit(f"Ошибка смены модели: {e}")
 
     def _update_model_info_label(self):
         """Update model info label below dropdown."""
@@ -1097,6 +1148,9 @@ class MainWindow(QMainWindow):
         """Handle quality profile change."""
         try:
             if profile != self.config.quality_profile:
+                cr = get_reporter()
+                if cr:
+                    cr.set_context("QUALITY_PROFILE_CHANGE", profile=profile)
                 # Apply profile preset
                 self.config.apply_quality_profile(profile)
 
@@ -1309,4 +1363,4 @@ def run():
     app.setQuitOnLastWindowClosed(False)
     window = MainWindow()
     window.show()
-    sys.exit(app.exec())
+    return app.exec()

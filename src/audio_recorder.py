@@ -211,12 +211,13 @@ class AudioRecorder:
                     blocksize=1024,
                     device=device_param
                 )
-                self._stream.start()
-                self._recording = True
 
-                # Start thread to collect audio data
+                # IMPORTANT: set _recording and start collect thread BEFORE stream
+                # to avoid race condition where first audio frames are dropped
+                self._recording = True
                 self._collect_thread = threading.Thread(target=self._collect_audio, daemon=True)
                 self._collect_thread.start()
+                self._stream.start()
 
                 return True
             except Exception as e:

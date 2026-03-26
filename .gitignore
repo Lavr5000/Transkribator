@@ -51,6 +51,9 @@ Thumbs.db
 # Logs
 *.log
 
+# Crash reports
+crashes/
+
 # Config (user-specific)
 config.json
 

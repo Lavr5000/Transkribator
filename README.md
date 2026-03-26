@@ -86,6 +86,22 @@ GPU is optional — Sherpa-ONNX runs efficiently on CPU.
 - **Audio**: sounddevice + numpy
 - **Build**: PyInstaller
 
+## Crash Reporting & Watchdog
+
+Transkribator includes a built-in crash reporting system:
+
+- **Automatic crash reports** — on unhandled exceptions, a JSON report is saved to `%LOCALAPPDATA%/WhisperTyping/WhisperTyping/crashes/` with exception details, system info, and recent log lines
+- **C-level fault handler** — catches segfaults and fatal errors via Python's `faulthandler` module
+- **Telegram notifications** — crash reports are sent to your Telegram Saved Messages (optional, requires Telethon setup)
+- **Quality monitor** — detects transcription quality degradation (3+ consecutive empty results) and sends alerts
+- **Watchdog** — `scripts/watchdog.py` runs the app as a subprocess, auto-restarts on crash (max 3 restarts in 5 minutes)
+
+### Running with watchdog
+
+```bash
+python scripts/watchdog.py
+```
+
 ## License
 
 MIT — free for personal and commercial use.

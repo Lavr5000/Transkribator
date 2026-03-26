@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Callable, Optional, Tuple
 import numpy as np
 
+from crash_reporter import get_reporter
+
 logger = logging.getLogger("transkribator")
 
 from text_processor import AdvancedTextProcessor
@@ -137,46 +139,69 @@ class Transcriber:
         model_size: Optional[str] = None
     ):
         """
-        Switch to a different backend.
+        Switch to a different backend with rollback on failure.
+
+        Saves old state before switching. If new backend fails to load,
+        restores old backend, processor, and config. Old backend is only
+        unloaded after new one is confirmed working.
 
         Args:
             backend: New backend name (whisper, sherpa, podlodka-turbo)
             model_size: Optional new model size
         """
         with self._lock:
-            # Unload current backend
-            old_backend = self.backend_name
-            if self._backend:
+            # Save old state for rollback
+            old_backend_name = self.backend_name
+            old_model_size = self.model_size
+            old_backend_instance = self._backend
+            old_processor = self.text_processor
+
+            cr = get_reporter()
+            if cr:
+                cr.set_context("BACKEND_SWITCH", backend=backend, model=model_size or self.model_size, previous_backend=old_backend_name)
+
+            logger.info("BACKEND_SWITCH | %s → %s | model=%s", old_backend_name, backend, model_size or self.model_size)
+
+            try:
+                # Update configuration
+                self.backend_name = backend
+                if model_size:
+                    self.model_size = model_size
+
+                # Recreate text processor for new backend
+                lang_code = self.language or "ru"
+                if backend == "sherpa" and ENHANCED_PROCESSOR_AVAILABLE:
+                    self.text_processor = EnhancedTextProcessor(
+                        language=lang_code,
+                        enable_corrections=self._enable_post_processing,
+                        enable_punctuation=True,
+                        user_dictionary=self.user_dictionary,
+                    )
+                else:
+                    self.text_processor = AdvancedTextProcessor(
+                        language=lang_code,
+                        enable_corrections=self._enable_post_processing
+                    )
+
+                # Create new backend (may raise)
+                self._create_backend()
+
+            except Exception:
+                # Rollback: restore old state
+                logger.error("BACKEND_SWITCH_ROLLBACK | %s → %s failed, restoring %s",
+                             old_backend_name, backend, old_backend_name)
+                self.backend_name = old_backend_name
+                self.model_size = old_model_size
+                self._backend = old_backend_instance
+                self.text_processor = old_processor
+                raise
+
+            # Success: unload old backend now
+            if old_backend_instance and old_backend_instance is not self._backend:
                 try:
-                    self._backend.unload_model()
+                    old_backend_instance.unload_model()
                 except Exception as e:
-                    logger.warning("UNLOAD_FAILED | error=%s", e)
-
-            # Update configuration
-            self.backend_name = backend
-            if model_size:
-                self.model_size = model_size
-            logger.info("BACKEND_SWITCH | %s → %s | model=%s", old_backend, backend, model_size or self.model_size)
-
-            # Recreate text processor for new backend
-            # Sherpa needs EnhancedTextProcessor (with punctuation)
-            # Others use AdvancedTextProcessor (already have punctuation)
-            lang_code = self.language or "ru"
-            if backend == "sherpa" and ENHANCED_PROCESSOR_AVAILABLE:
-                self.text_processor = EnhancedTextProcessor(
-                    language=lang_code,
-                    enable_corrections=self._enable_post_processing,
-                    enable_punctuation=True,
-                    user_dictionary=self.user_dictionary,
-                )
-            else:
-                self.text_processor = AdvancedTextProcessor(
-                    language=lang_code,
-                    enable_corrections=self._enable_post_processing
-                )
-
-            # Create new backend
-            self._create_backend()
+                    logger.warning("UNLOAD_OLD_BACKEND_FAILED | error=%s", e)
 
     def cancel(self):
         """Signal cancellation for long-running transcription."""
@@ -203,6 +228,9 @@ class Transcriber:
             self._create_backend()
 
         audio_duration = len(audio) / sample_rate
+        cr = get_reporter()
+        if cr:
+            cr.set_context("TRANSCRIBE", backend=self.backend_name, model=self.model_size, audio_duration_sec=round(audio_duration, 1))
         logger.info("TRANSCRIBE_START | backend=%s | audio=%.1fs (%d samples) | sr=%d",
                      self.backend_name, audio_duration, len(audio), sample_rate)
 
@@ -214,6 +242,19 @@ class Transcriber:
 
             # Track if Groq fell back to Sherpa
             self.last_used_fallback = getattr(self._backend, 'last_used_fallback', False)
+
+            # If Groq fell back to Sherpa, use EnhancedTextProcessor for proper
+            # punctuation restoration (Sherpa CTC output has no punctuation)
+            if self.last_used_fallback and self.backend_name == "groq" and ENHANCED_PROCESSOR_AVAILABLE:
+                if not isinstance(self.text_processor, EnhancedTextProcessor):
+                    lang_code = self.language or "ru"
+                    self.text_processor = EnhancedTextProcessor(
+                        language=lang_code,
+                        enable_corrections=self._enable_post_processing,
+                        enable_punctuation=True,
+                        user_dictionary=self.user_dictionary,
+                    )
+                    logger.info("GROQ_FALLBACK_PROCESSOR_SWITCH | switched to EnhancedTextProcessor")
 
             # Check cancellation after transcription
             if self._cancel_event.is_set():
