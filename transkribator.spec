@@ -16,6 +16,7 @@ datas = []
 datas += collect_data_files('sherpa_onnx')
 # Project models (sherpa ONNX models for transcription)
 datas += [('models/sherpa/giga-am-v2-ru', 'models/sherpa/giga-am-v2-ru')]
+datas += [('models/sherpa/giga-am-v3-ru', 'models/sherpa/giga-am-v3-ru')]
 
 # Collect all submodules to ensure complete packaging
 hiddenimports = []
@@ -44,6 +45,12 @@ hiddenimports += [
     'src.transcriber',
     'src.backends',
     'src.remote_client',
+    'src.crash_reporter',
+    'src.notifier',
+    'src.quality_monitor',
+    'src.widgets',
+    'src.settings_dialog',
+    'src.morph_singleton',
 ]
 
 # Additional dependencies
@@ -65,7 +72,22 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        'torch', 'torchvision', 'torchaudio',
+        'transformers', 'tokenizers', 'huggingface_hub',
+        'sklearn', 'scikit-learn',
+        'matplotlib', 'PIL', 'Pillow',
+        'cv2', 'opencv-python',
+        'pandas', 'scipy',
+        'tensorflow', 'keras',
+        'yt_dlp',
+        'sympy', 'numba', 'llvmlite',
+        'sqlalchemy', 'psycopg2',
+        'faster_whisper', 'ctranslate2',
+        'groq',
+        'telethon', 'cryptg',
+        'tkinter', '_tkinter',
+    ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
