@@ -104,10 +104,10 @@ class WhisperBackend(BaseBackend):
             vad_dir = Path(__file__).parent.parent.parent / "models" / "sherpa" / "silero-vad"
         vad_dir.mkdir(parents=True, exist_ok=True)
 
-        if not (vad_dir / "v4.onnx").exists():
+        if not any((vad_dir / n).exists() for n in ("silero_vad.onnx", "v4.onnx", "model.onnx")):
             try:
                 snapshot_download(
-                    repo_id="csukuangfj/sherpa-onnx-silero-vad",
+                    repo_id="deepghs/silero-vad-onnx",
                     local_dir=str(vad_dir),
                     local_dir_use_symlinks=False,
                 )

@@ -18,6 +18,19 @@ import os
 # Add src to path — must be before importing crash_reporter
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
+# Inject HuggingFace token so snapshot_download() can fetch VAD / punctuation
+# models. Anonymous access started returning 401 on 2026-04-05.
+if not os.environ.get("HF_TOKEN") and not os.environ.get("HUGGING_FACE_HUB_TOKEN"):
+    try:
+        sys.path.insert(0, r"C:\Users\user\.claude\0 ProEKTi\blogger")
+        from api_keys import get_key  # type: ignore
+        _hf = get_key("huggingface")
+        if _hf:
+            os.environ["HF_TOKEN"] = _hf
+            os.environ["HUGGING_FACE_HUB_TOKEN"] = _hf
+    except Exception:
+        pass
+
 # Install CrashReporter early — before any native library imports
 from crash_reporter import CrashReporter
 crash_reporter = CrashReporter()
