@@ -172,11 +172,14 @@ class SherpaBackend(BaseBackend):
             vad_dir = Path(__file__).parent.parent.parent / "models" / "sherpa" / "silero-vad"
         vad_dir.mkdir(parents=True, exist_ok=True)
 
-        # Check if model exists, download if missing
-        if not (vad_dir / "v4.onnx").exists():
+        # Check if model exists, download if missing.
+        # NOTE (2026-04-06): original repo csukuangfj/sherpa-onnx-silero-vad was
+        # removed from HuggingFace. Switched to deepghs/silero-vad-onnx which
+        # ships silero_vad.onnx (already in the fallback list at line ~259).
+        if not any((vad_dir / n).exists() for n in ("silero_vad.onnx", "v4.onnx", "model.onnx")):
             try:
                 snapshot_download(
-                    repo_id="csukuangfj/sherpa-onnx-silero-vad",
+                    repo_id="deepghs/silero-vad-onnx",
                     local_dir=str(vad_dir),
                     local_dir_use_symlinks=False,
                 )

@@ -50,6 +50,7 @@ Thumbs.db
 
 # Logs
 *.log
+*.log.*
 
 # Crash reports
 crashes/
@@ -72,3 +73,11 @@ Gemini_Generated_Image_*
 
 # Planning docs (Claude-generated)
 .planning/
+tasks/
+
+# Downloaded VAD models
+models/sherpa/silero-vad/
+
+# One-off helper scripts (not part of the app)
+extract_*.py
+send_*.py
