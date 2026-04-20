@@ -7,9 +7,10 @@ from PyQt6.QtWidgets import (
     QCheckBox, QGroupBox, QTabWidget, QButtonGroup,
     QMessageBox, QScrollArea,
     QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog, QLineEdit, QAbstractItemView,
-    QSlider,
+    QSlider, QToolTip,
 )
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QCursor
 
 from config import WHISPER_MODELS, SHERPA_MODELS, PODLODKA_MODELS, GROQ_MODELS, LANGUAGES, BACKENDS, MOUSE_BUTTONS, PASTE_METHODS, QUALITY_PROFILES, MODEL_METADATA
 from widgets import COLORS, COLORS_HEX, DIALOG_STYLESHEET, DictionaryEntryDialog
@@ -347,7 +348,7 @@ class SettingsDialog(QDialog):
             stats = QGroupBox("Статистика")
             stats_layout = QVBoxLayout(stats)
             self.stats_words = QLabel(f"Слов: {self.config.total_words:,}")
-            self.stats_recordings = QLabel(f"Записей: {self.config.total_recordings:,}")
+            self.stats_recordings = QLabel(f"Всего записей (за время использования): {self.config.total_recordings:,}")
             self.stats_saved = QLabel(f"Время: {self.config.total_seconds_saved/60:.1f} мин")
             stats_layout.addWidget(self.stats_words)
             stats_layout.addWidget(self.stats_recordings)
@@ -378,6 +379,7 @@ class SettingsDialog(QDialog):
         self.history_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self.history_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.history_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.history_table.cellDoubleClicked.connect(self._copy_history_on_double_click)
         history_layout.addWidget(self.history_table)
 
         # Buttons row
@@ -631,8 +633,13 @@ class SettingsDialog(QDialog):
             try:
                 import pyperclip
                 pyperclip.copy(full_text)
+                QToolTip.showText(QCursor.pos(), "Скопировано", self.history_table)
             except ImportError:
                 pass
+
+    def _copy_history_on_double_click(self, row: int, column: int):
+        self.history_table.selectRow(row)
+        self._copy_history_entry()
 
     def _export_history(self):
         if not self.history_manager:
@@ -656,7 +663,7 @@ class SettingsDialog(QDialog):
     def update_stats_display(self):
         if self.config:
             self.stats_words.setText(f"Слов: {self.config.total_words:,}")
-            self.stats_recordings.setText(f"Записей: {self.config.total_recordings:,}")
+            self.stats_recordings.setText(f"Всего записей (за время использования): {self.config.total_recordings:,}")
             self.stats_saved.setText(f"Время: {self.config.total_seconds_saved/60:.1f} мин")
 
     def _reset_vad_defaults(self):
