@@ -78,6 +78,22 @@ tasks/
 # Downloaded VAD models
 models/sherpa/silero-vad/
 
+# Downloaded STT models (225+ MB each, fetched on demand from HuggingFace)
+models/sherpa/giga-am-v3-ru-punct/
+models/sherpa/giga-am-v3-ru-transducer/
+models/sherpa/giga-am-v3-ru-transducer-punct/
+
+# Benchmark artifacts (local-only, regenerated on demand)
+scripts/bench_*
+scripts/e2e_*
+scripts/download_gigaam_*
+
+# Private audio samples used for benchmarking (user recordings)
+tests/audio_samples/
+
+# Telegram voice messages (.oga extension, not covered by *.ogg)
+*.oga
+
 # One-off helper scripts (not part of the app)
 extract_*.py
 send_*.py

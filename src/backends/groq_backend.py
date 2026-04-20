@@ -131,6 +131,8 @@ class GroqBackend(BaseBackend):
                     file=("audio.wav", wav_bytes),
                     model=self.model_size,
                     language=self.language if self.language != "auto" else None,
+                    temperature=0.0,  # deterministic decoding reduces Russian hallucinations
+                    prompt="Диктовка на русском языке.",  # hints Groq to expect RU dictation
                     timeout=GROQ_API_TIMEOUT,
                 )
                 text = resp.text.strip()
