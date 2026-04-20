@@ -23,9 +23,10 @@ class Config:
     backend: str = "sherpa"  # whisper, sherpa (sherpa is ~30% faster for Russian)
 
     # Model settings
-    model_size: str = "giga-am-v3-ru"  # For Sherpa: giga-am-v3-ru (default), giga-am-v2-ru, giga-am-ru
-                                      # For Whisper: tiny, base, small, medium, large
-                                      # For Podlodka: podlodka-turbo
+    model_size: str = "giga-am-v3-ru-punct"  # For Sherpa: giga-am-v3-ru-punct (default, with punctuation),
+                                              # giga-am-v3-ru, giga-am-v2-ru, giga-am-ru
+                                              # For Whisper: tiny, base, small, medium, large
+                                              # For Podlodka: podlodka-turbo
     language: str = "ru"  # auto-detect or specific language code
     device: str = "auto"  # auto, cpu, cuda
     compute_type: str = "auto"  # auto, int8, float16, float32
@@ -186,7 +187,8 @@ WHISPER_MODELS = {
 
 # Available Sherpa-ONNX models
 SHERPA_MODELS = {
-    "giga-am-v3-ru": "GigaAM v3 Russian (2025, recommended)",
+    "giga-am-v3-ru-punct": "GigaAM v3 Russian + Punctuation (2025-12, recommended)",
+    "giga-am-v3-ru": "GigaAM v3 Russian (2025)",
     "giga-am-v2-ru": "GigaAM v2 Russian (2025)",
     "giga-am-ru": "GigaAM Russian (2024)",
 }
@@ -293,8 +295,9 @@ MODEL_METADATA = {
     "large-v3": {"ram_mb": 10000, "rtf": 3.5, "description": "Последний (v3)"},
     "large-v3-turbo": {"ram_mb": 10000, "rtf": 3.0, "description": "Макс. точность"},
     # Sherpa models
-    "giga-am-v3-ru": {"ram_mb": 220, "rtf": 0.1, "description": "Русский (2025, CTC v3)"},
-    "giga-am-v2-ru": {"ram_mb": 140, "rtf": 0.1, "description": "Русский (2025)"},
+    "giga-am-v3-ru-punct": {"ram_mb": 250, "rtf": 0.05, "description": "Русский + пунктуация (v3, 2025-12)"},
+    "giga-am-v3-ru": {"ram_mb": 220, "rtf": 0.04, "description": "Русский (2025, CTC v3)"},
+    "giga-am-v2-ru": {"ram_mb": 140, "rtf": 0.09, "description": "Русский (2025)"},
     "giga-am-ru": {"ram_mb": 140, "rtf": 0.1, "description": "Русский (2024)"},
     # Podlodka model
     "podlodka-turbo": {"ram_mb": 1000, "rtf": 0.4, "description": "Ru fine-tuned"},

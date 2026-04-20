@@ -53,9 +53,16 @@ class SherpaBackend(BaseBackend):
         },
         "giga-am-v3-ru": {
             "name": "GigaAM v3 Russian CTC (2025)",
-            "url": "",
+            "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-ctc-giga-am-v3-russian-2025-12-16",
             "files": ["v3_ctc.int8.onnx", "tokens.txt"],
             "ctc_model_file": "v3_ctc.int8.onnx",
+            "language": "ru",
+        },
+        "giga-am-v3-ru-punct": {
+            "name": "GigaAM v3 Russian CTC + Punctuation (2025-12-16)",
+            "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-ctc-punct-giga-am-v3-russian-2025-12-16",
+            "files": ["model.int8.onnx", "tokens.txt"],
+            "ctc_model_file": "model.int8.onnx",
             "language": "ru",
         },
     }
@@ -222,13 +229,14 @@ class SherpaBackend(BaseBackend):
             tokens_file = model_dir / "tokens.txt"
 
             if model_file.exists():
-                # CTC model (GigaAM v2 CTC)
+                # CTC model (GigaAM uses 64 mel bins per ai-sage/GigaAM spec,
+                # confirmed via ONNX metadata preprocessor.featurizer.n_mels=64)
                 self._recognizer = sherpa_onnx.OfflineRecognizer.from_nemo_ctc(
                     model=str(model_file),
                     tokens=str(tokens_file),
                     num_threads=self.num_threads,
                     sample_rate=16000,
-                    feature_dim=80,
+                    feature_dim=64,
                     decoding_method="greedy_search",
                     debug=False,
                 )
