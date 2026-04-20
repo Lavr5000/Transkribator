@@ -50,7 +50,7 @@ class GroqBackend(BaseBackend):
         if self._fallback is None:
             from .sherpa_backend import SherpaBackend
             self._fallback = SherpaBackend(
-                model_size="giga-am-v3-ru",
+                model_size="giga-am-v3-ru-punct",
                 on_progress=self.on_progress,
             )
         return self._fallback
