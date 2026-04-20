@@ -14,9 +14,28 @@ Or after installation:
 
 import sys
 import os
+from pathlib import Path
 
 # Add src to path — must be before importing crash_reporter
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+
+# Inject HuggingFace token so snapshot_download() can fetch VAD / punctuation
+# models. Anonymous access started returning 401 on 2026-04-05. Users should
+# set HF_TOKEN (or HUGGING_FACE_HUB_TOKEN) in their environment, or run
+# `huggingface-cli login` once. The block below is a dev-only convenience
+# that reads the token from the author's local keystore when present.
+if not os.environ.get("HF_TOKEN") and not os.environ.get("HUGGING_FACE_HUB_TOKEN"):
+    _keystore_dir = Path.home() / ".claude" / "0 ProEKTi" / "blogger"
+    if (_keystore_dir / "api_keys.py").exists():
+        try:
+            sys.path.insert(0, str(_keystore_dir))
+            from api_keys import get_key  # type: ignore
+            _hf = get_key("huggingface")
+            if _hf:
+                os.environ["HF_TOKEN"] = _hf
+                os.environ["HUGGING_FACE_HUB_TOKEN"] = _hf
+        except Exception as _e:
+            print(f"[main] HF token injection from keystore failed: {_e}", file=sys.stderr)
 
 # Install CrashReporter early — before any native library imports
 from crash_reporter import CrashReporter
