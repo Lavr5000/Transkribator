@@ -1035,6 +1035,12 @@ class MainWindow(QMainWindow):
             self._settings.move(self.pos().x(), self.pos().y() + self.height() + 10)
             self._settings.show()
             self._settings.raise_()
+            # Refresh history and stats on every open (dialog is cached)
+            try:
+                self._settings._update_history_display()
+                self._settings.update_stats_display()
+            except Exception:
+                pass
         except Exception as e:
             logger.error("SHOW_SETTINGS_FAILED | %s", e, exc_info=True)
             QMessageBox.information(self, "Ошибка", f"Не удалось открыть настройки:\n{e}")
