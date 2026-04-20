@@ -103,10 +103,10 @@ class PodlodkaTurboBackend(BaseBackend):
         vad_dir = Path(__file__).parent.parent.parent / "models" / "sherpa" / "silero-vad"
         vad_dir.mkdir(parents=True, exist_ok=True)
 
-        if not (vad_dir / "v4.onnx").exists():
+        if not any((vad_dir / n).exists() for n in ("silero_vad.onnx", "v4.onnx", "model.onnx")):
             try:
                 snapshot_download(
-                    repo_id="csukuangfj/sherpa-onnx-silero-vad",
+                    repo_id="deepghs/silero-vad-onnx",
                     local_dir=str(vad_dir),
                     local_dir_use_symlinks=False,
                 )
@@ -154,17 +154,33 @@ class PodlodkaTurboBackend(BaseBackend):
             self._processor = AutoProcessor.from_pretrained(model_id)
 
             # Initialize Silero VAD if enabled
+            self._vad = None
             if self._vad_enabled:
                 try:
                     vad_dir = self._get_vad_model_dir()
-                    import sherpa_onnx
-                    self._vad = sherpa_onnx.OfflineVad(
-                        model_dir=str(vad_dir),
-                        threshold=self._vad_threshold,
-                        min_silence_duration=self._min_silence_duration_ms / 1000.0,
-                        min_speech_duration=self._min_speech_duration_ms / 1000.0,
-                    )
-                    logger.debug("PODLODKA_VAD_INIT | OK")
+                    vad_model_path = None
+                    for name in ("silero_vad.onnx", "v4.onnx", "model.onnx"):
+                        candidate = vad_dir / name
+                        if candidate.exists():
+                            vad_model_path = candidate
+                            break
+                    if vad_model_path is None:
+                        logger.warning("PODLODKA_VAD_MODEL_NOT_FOUND | dir=%s", vad_dir)
+                    else:
+                        import sherpa_onnx
+                        silero_config = sherpa_onnx.SileroVadModelConfig(
+                            model=str(vad_model_path),
+                            threshold=self._vad_threshold,
+                            min_silence_duration=self._min_silence_duration_ms / 1000.0,
+                            min_speech_duration=self._min_speech_duration_ms / 1000.0,
+                        )
+                        vad_config = sherpa_onnx.VadModelConfig(
+                            silero_vad=silero_config,
+                            sample_rate=16000,
+                            num_threads=1,
+                        )
+                        self._vad = sherpa_onnx.VadModel.create(vad_config)
+                        logger.debug("PODLODKA_VAD_INIT | model=%s", vad_model_path.name)
                 except Exception as e:
                     logger.warning("PODLODKA_VAD_INIT_FAILED | %s", e)
                     self._vad = None
@@ -215,34 +231,6 @@ class PodlodkaTurboBackend(BaseBackend):
 
         start_time = time.time()
 
-        # Apply VAD to filter silence if enabled (before transcription)
-        if self._vad_enabled and self._vad is not None:
-            try:
-                vad_stream = self._vad.create_stream()
-                vad_stream.accept_waveform(sample_rate, audio)
-                self._vad.compute(vad_stream)
-
-                segments = vad_stream.segments
-                if segments:
-                    speech_segments = []
-                    for seg in segments:
-                        start_sample = int(seg.start * sample_rate)
-                        end_sample = int(seg.end * sample_rate)
-                        start_sample = max(0, start_sample)
-                        end_sample = min(len(audio), end_sample)
-                        if end_sample > start_sample:
-                            speech_segments.append(audio[start_sample:end_sample])
-
-                    if speech_segments:
-                        audio = np.concatenate(speech_segments)
-                    else:
-                        return "", 0.0
-                else:
-                    return "", 0.0
-            except Exception as e:
-                logger.warning("PODLODKA_VAD_FILTER_FAILED | %s", e)
-                # Continue with original audio on VAD failure
-
         try:
             if self.on_progress:
                 self.on_progress("Transcribing with Podlodka-Turbo...")
@@ -254,7 +242,7 @@ class PodlodkaTurboBackend(BaseBackend):
             if len(audio.shape) > 1:
                 audio = audio.mean(axis=1)
 
-            # Resample if necessary
+            # Resample if necessary (model & VAD expect 16kHz)
             if sample_rate != 16000:
                 if SCIPY_AVAILABLE:
                     num_samples = int(len(audio) * 16000 / sample_rate)
@@ -266,6 +254,33 @@ class PodlodkaTurboBackend(BaseBackend):
                     num_samples = int(len(audio) * ratio)
                     indices = np.linspace(0, len(audio) - 1, num_samples)
                     audio = np.interp(indices, np.arange(len(audio)), audio)
+                audio = audio.astype(np.float32)
+
+            # Apply VAD to filter silence if enabled (after resample to 16kHz)
+            if self._vad_enabled and self._vad is not None:
+                try:
+                    window_size = self._vad.window_size()
+                    speech_windows = []
+                    has_speech = False
+                    for i in range(0, len(audio), window_size):
+                        window = audio[i:i + window_size]
+                        if len(window) < window_size:
+                            padded = np.zeros(window_size, dtype=np.float32)
+                            padded[:len(window)] = window
+                            is_speech = self._vad.is_speech(padded.tolist())
+                        else:
+                            is_speech = self._vad.is_speech(window.tolist())
+                        if is_speech:
+                            has_speech = True
+                            speech_windows.append(audio[i:min(i + window_size, len(audio))])
+                    self._vad.reset()
+                    if has_speech and speech_windows:
+                        audio = np.concatenate(speech_windows)
+                    else:
+                        return "", 0.0
+                except Exception as e:
+                    logger.warning("PODLODKA_VAD_FILTER_FAILED | %s", e)
+                    # Continue with original audio on VAD failure
 
             # Prepare input
             inputs = self._processor(
