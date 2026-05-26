@@ -23,8 +23,9 @@ class Config:
     backend: str = "sherpa"  # whisper, sherpa (sherpa is ~30% faster for Russian)
 
     # Model settings
-    model_size: str = "giga-am-v3-ru-punct"  # For Sherpa: giga-am-v3-ru-punct (default, with punctuation),
-                                              # giga-am-v3-ru, giga-am-v2-ru, giga-am-ru
+    model_size: str = "giga-am-v3-ru"         # For Sherpa: giga-am-v3-ru (default, shipped in repo + spec),
+                                              # giga-am-v3-ru-punct (with punctuation, downloaded on demand),
+                                              # giga-am-v2-ru, giga-am-ru
                                               # For Whisper: tiny, base, small, medium, large
                                               # For Podlodka: podlodka-turbo
     language: str = "ru"  # auto-detect or specific language code
@@ -116,27 +117,39 @@ class Config:
                 pass
         return cls()
 
+    def _get_lock(self) -> threading.Lock:
+        """Lazy-init lock guarding deferred-flush state and disk writes."""
+        lock = getattr(self, '_save_lock', None)
+        if lock is None:
+            lock = threading.Lock()
+            object.__setattr__(self, '_save_lock', lock)
+        return lock
+
     def save(self) -> None:
         """Save configuration to file (rate-limited to avoid excessive disk I/O)."""
-        now = time.time()
-        if hasattr(self, '_last_save_time') and now - self._last_save_time < 0.5:
-            if not getattr(self, '_deferred_pending', False):
-                self._deferred_pending = True
-                threading.Timer(1.0, self._deferred_flush).start()
-            return
+        with self._get_lock():
+            now = time.time()
+            last = getattr(self, '_last_save_time', 0)
+            if last and now - last < 0.5:
+                if not getattr(self, '_deferred_pending', False):
+                    self._deferred_pending = True
+                    threading.Timer(1.0, self._deferred_flush).start()
+                return
         self._write_to_disk()
 
     def _deferred_flush(self):
         """Flush deferred save to disk."""
-        self._deferred_pending = False
+        with self._get_lock():
+            self._deferred_pending = False
         self._write_to_disk()
 
     def _write_to_disk(self):
-        """Write config to disk immediately."""
-        self._last_save_time = time.time()
-        config_path = self.get_config_path()
-        with open(config_path, "w", encoding="utf-8") as f:
-            json.dump(asdict(self), f, indent=2)
+        """Write config to disk immediately (lock-protected)."""
+        with self._get_lock():
+            self._last_save_time = time.time()
+            config_path = self.get_config_path()
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(asdict(self), f, indent=2)
 
     def update_stats(self, words: int, duration: float) -> None:
         """Update usage statistics."""
