@@ -92,6 +92,13 @@ class Config:
     total_recordings: int = 0
     total_seconds_saved: float = 0.0
 
+    def __post_init__(self) -> None:
+        # Non-field state guarding rate-limited disk writes.
+        # Initialized once at construction, before any thread can call save().
+        self._save_lock = threading.Lock()
+        self._last_save_time = 0.0
+        self._deferred_pending = False
+
     @classmethod
     def get_config_dir(cls) -> Path:
         """Get the configuration directory."""
@@ -117,39 +124,30 @@ class Config:
                 pass
         return cls()
 
-    def _get_lock(self) -> threading.Lock:
-        """Lazy-init lock guarding deferred-flush state and disk writes."""
-        lock = getattr(self, '_save_lock', None)
-        if lock is None:
-            lock = threading.Lock()
-            object.__setattr__(self, '_save_lock', lock)
-        return lock
-
     def save(self) -> None:
         """Save configuration to file (rate-limited to avoid excessive disk I/O)."""
-        with self._get_lock():
+        with self._save_lock:
             now = time.time()
-            last = getattr(self, '_last_save_time', 0)
-            if last and now - last < 0.5:
-                if not getattr(self, '_deferred_pending', False):
+            if self._last_save_time and now - self._last_save_time < 0.5:
+                if not self._deferred_pending:
                     self._deferred_pending = True
                     threading.Timer(1.0, self._deferred_flush).start()
                 return
-        self._write_to_disk()
+            self._last_save_time = now
+            self._write_locked()
 
     def _deferred_flush(self):
         """Flush deferred save to disk."""
-        with self._get_lock():
+        with self._save_lock:
             self._deferred_pending = False
-        self._write_to_disk()
-
-    def _write_to_disk(self):
-        """Write config to disk immediately (lock-protected)."""
-        with self._get_lock():
             self._last_save_time = time.time()
-            config_path = self.get_config_path()
-            with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(asdict(self), f, indent=2)
+            self._write_locked()
+
+    def _write_locked(self):
+        """Write config to disk. Caller MUST hold self._save_lock."""
+        config_path = self.get_config_path()
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(asdict(self), f, indent=2)
 
     def update_stats(self, words: int, duration: float) -> None:
         """Update usage statistics."""

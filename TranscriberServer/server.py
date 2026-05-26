@@ -11,6 +11,7 @@ Security model (Tier 1 hardening):
 - /health does not leak backend/model state.
 """
 import os
+import secrets
 import uuid
 from pathlib import Path
 
@@ -50,7 +51,7 @@ RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _require_api_key(x_api_key: str) -> None:
-    if not x_api_key or x_api_key != API_KEY:
+    if not x_api_key or not secrets.compare_digest(x_api_key, API_KEY):
         raise HTTPException(status_code=401, detail="invalid or missing X-API-Key")
 
 
