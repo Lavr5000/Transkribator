@@ -7,7 +7,7 @@ Handles voiced/unvoiced consonant substitutions common in ASR:
 import re
 from typing import Optional
 
-from morph_singleton import PYMORPHY2_AVAILABLE as PYMORPHY_AVAILABLE, get_morph
+from .morph_singleton import PYMORPHY2_AVAILABLE as PYMORPHY_AVAILABLE, get_morph
 
 
 # Voiced/unvoiced consonant pairs in Russian

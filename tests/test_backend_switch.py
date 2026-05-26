@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
 def _make_mock_backend(name="mock"):
@@ -24,9 +24,9 @@ def transcriber():
     mock_backend = _make_mock_backend("sherpa")
     mock_cls = MagicMock(return_value=mock_backend)
 
-    with patch("transcriber.get_backend", return_value=mock_cls):
-        with patch("transcriber.get_reporter", return_value=None):
-            from transcriber import Transcriber
+    with patch("src.transcriber.get_backend", return_value=mock_cls):
+        with patch("src.transcriber.get_reporter", return_value=None):
+            from src.transcriber import Transcriber
             t = Transcriber(backend="sherpa", model_size="v3", enable_post_processing=False)
             return t
 
@@ -39,8 +39,8 @@ class TestBackendSwitch:
         new_mock = _make_mock_backend("whisper")
         new_cls = MagicMock(return_value=new_mock)
 
-        with patch("transcriber.get_backend", return_value=new_cls):
-            with patch("transcriber.get_reporter", return_value=None):
+        with patch("src.transcriber.get_backend", return_value=new_cls):
+            with patch("src.transcriber.get_reporter", return_value=None):
                 transcriber.switch_backend("whisper", "base")
 
         assert transcriber.backend_name == "whisper"
@@ -59,8 +59,8 @@ class TestBackendSwitch:
         # Make get_backend return a class that raises on instantiation
         failing_cls = MagicMock(side_effect=RuntimeError("Model load failed"))
 
-        with patch("transcriber.get_backend", return_value=failing_cls):
-            with patch("transcriber.get_reporter", return_value=None):
+        with patch("src.transcriber.get_backend", return_value=failing_cls):
+            with patch("src.transcriber.get_reporter", return_value=None):
                 with pytest.raises(RuntimeError, match="Model load failed"):
                     transcriber.switch_backend("whisper", "base")
 
@@ -77,12 +77,12 @@ class TestBackendSwitch:
         new_mock = _make_mock_backend("whisper")
         new_cls = MagicMock(return_value=new_mock)
 
-        with patch("transcriber.get_backend", return_value=new_cls):
-            with patch("transcriber.get_reporter", return_value=None):
+        with patch("src.transcriber.get_backend", return_value=new_cls):
+            with patch("src.transcriber.get_reporter", return_value=None):
                 transcriber.switch_backend("whisper", "base")
 
         # Whisper uses AdvancedTextProcessor (not Enhanced)
-        from text_processor import AdvancedTextProcessor
+        from src.text_processor import AdvancedTextProcessor
         assert isinstance(transcriber.text_processor, AdvancedTextProcessor)
 
     def test_concurrent_switch_locked(self, transcriber):
@@ -95,8 +95,8 @@ class TestBackendSwitch:
                 barrier.wait()
                 new_mock = _make_mock_backend(name)
                 new_cls = MagicMock(return_value=new_mock)
-                with patch("transcriber.get_backend", return_value=new_cls):
-                    with patch("transcriber.get_reporter", return_value=None):
+                with patch("src.transcriber.get_backend", return_value=new_cls):
+                    with patch("src.transcriber.get_reporter", return_value=None):
                         transcriber.switch_backend("sherpa", "v3")
                 results.append(f"{name}_ok")
             except Exception as e:

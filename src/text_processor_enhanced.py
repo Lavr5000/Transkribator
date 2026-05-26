@@ -5,7 +5,7 @@ from typing import Dict, List, Tuple, Optional
 
 logger = logging.getLogger("transkribator")
 
-from text_processor import TextProcessor
+from .text_processor import TextProcessor
 
 try:
     from deepmultilingualpunctuation import PunctuationModel
@@ -16,7 +16,7 @@ except ImportError:
 
 # Import phonetic corrections
 try:
-    from phonetics import PhoneticCorrector
+    from .phonetics import PhoneticCorrector
     PHONETICS_AVAILABLE = True
 except ImportError:
     PHONETICS_AVAILABLE = False
@@ -25,7 +25,7 @@ except ImportError:
 
 # Import morphological corrections
 try:
-    from morphology import MorphologyCorrector
+    from .morphology import MorphologyCorrector
     MORPHOLOGY_AVAILABLE = True
 except ImportError:
     MORPHOLOGY_AVAILABLE = False
@@ -34,7 +34,7 @@ except ImportError:
 
 # Import proper noun corrections
 try:
-    from proper_nouns import ProperNounDict
+    from .proper_nouns import ProperNounDict
     PROPER_NOUNS_AVAILABLE = True
 except ImportError:
     PROPER_NOUNS_AVAILABLE = False

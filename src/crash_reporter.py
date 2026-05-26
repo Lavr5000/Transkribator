@@ -122,7 +122,7 @@ class CrashReporter:
     def _notify_telegram(self, report):
         """Send crash report to Telegram Saved Messages (best-effort)."""
         try:
-            from notifier import TelegramNotifier
+            from .notifier import TelegramNotifier
             notifier = TelegramNotifier(crash_dir=self.crash_dir)
             message = notifier.format_crash_report(report)
             notifier.send(message)

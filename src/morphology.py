@@ -7,7 +7,7 @@ Uses singleton pattern for pymorphy2.MorphAnalyzer to avoid performance issues.
 import re
 from typing import Optional, List, Tuple
 
-from morph_singleton import PYMORPHY2_AVAILABLE, get_morph
+from .morph_singleton import PYMORPHY2_AVAILABLE, get_morph
 
 
 class MorphologyCorrector:

@@ -22,22 +22,22 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread
 from PyQt6.QtGui import QIcon, QPixmap, QAction
 from PyQt6 import sip
 
-from config import Config, MODEL_METADATA
-from audio_recorder import AudioRecorder
-from transcriber import Transcriber, get_available_backends
-from crash_reporter import get_reporter
-from notifier import TelegramNotifier
-from quality_monitor import QualityMonitor
-from hotkeys import HotkeyManager, type_text, safe_paste_text, paste_from_clipboard
-from history_manager import HistoryManager
-from mouse_handler import MouseButtonHandler
-from remote_client import RemoteTranscriptionClient
-from widgets import (
+from .config import Config, MODEL_METADATA
+from .audio_recorder import AudioRecorder
+from .transcriber import Transcriber, get_available_backends
+from .crash_reporter import get_reporter
+from .notifier import TelegramNotifier
+from .quality_monitor import QualityMonitor
+from .hotkeys import HotkeyManager, type_text, safe_paste_text, paste_from_clipboard
+from .history_manager import HistoryManager
+from .mouse_handler import MouseButtonHandler
+from .remote_client import RemoteTranscriptionClient
+from .widgets import (
     COLORS, COLORS_HEX, COMPACT_HEIGHT, COMPACT_WIDTH,
     RecordButton, CopyButton, SettingsButton, CloseButton, CancelButton,
     ClickableLabel, GradientWidget, TextPopup,
 )
-from settings_dialog import SettingsDialog
+from .settings_dialog import SettingsDialog
 
 try:
     import pyperclip

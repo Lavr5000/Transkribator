@@ -16,9 +16,6 @@ import sys
 import os
 from pathlib import Path
 
-# Add src to path — must be before importing crash_reporter
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
-
 # Inject HuggingFace token so snapshot_download() can fetch VAD / punctuation
 # models. Anonymous access started returning 401 on 2026-04-05. Users should
 # set HF_TOKEN (or HUGGING_FACE_HUB_TOKEN) in their environment, or run
@@ -38,13 +35,13 @@ if not os.environ.get("HF_TOKEN") and not os.environ.get("HUGGING_FACE_HUB_TOKEN
             print(f"[main] HF token injection from keystore failed: {_e}", file=sys.stderr)
 
 # Install CrashReporter early — before any native library imports
-from crash_reporter import CrashReporter
+from src.crash_reporter import CrashReporter
 crash_reporter = CrashReporter()
 crash_reporter.install()
 
 # Retry unsent Telegram notifications from previous crashes
 try:
-    from notifier import TelegramNotifier
+    from src.notifier import TelegramNotifier
     TelegramNotifier(crash_dir=crash_reporter.crash_dir).send_unsent()
 except Exception:
     pass

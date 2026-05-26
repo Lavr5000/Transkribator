@@ -12,19 +12,19 @@ from pathlib import Path
 from typing import Callable, Optional, Tuple
 import numpy as np
 
-from crash_reporter import get_reporter
+from .crash_reporter import get_reporter
 
 logger = logging.getLogger("transkribator")
 
-from text_processor import AdvancedTextProcessor
+from .text_processor import AdvancedTextProcessor
 
 # Try to import enhanced text processor with punctuation
 try:
-    from text_processor_enhanced import EnhancedTextProcessor
+    from .text_processor_enhanced import EnhancedTextProcessor
     ENHANCED_PROCESSOR_AVAILABLE = True
 except ImportError:
     ENHANCED_PROCESSOR_AVAILABLE = False
-from backends import get_backend, BaseBackend
+from .backends import get_backend, BaseBackend
 
 
 class Transcriber:
@@ -266,10 +266,10 @@ class Transcriber:
                 text = self.text_processor.process(text)
 
             process_time = time.time() - start_time
-            logger.info("TRANSCRIBE_DONE | backend=%s | audio=%.1fs | elapsed=%.2fs (RTF=%.2f) | words=%d | \"%s\"",
+            logger.info("TRANSCRIBE_DONE | backend=%s | audio=%.1fs | elapsed=%.2fs (RTF=%.2f) | words=%d | chars=%d",
                          self.backend_name, audio_duration, process_time,
                          process_time / audio_duration if audio_duration > 0 else 0,
-                         len(text.split()), text[:50])
+                         len(text.split()), len(text))
             return text, process_time
 
         except Exception as e:

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
 @pytest.fixture
@@ -22,7 +22,7 @@ def mock_notifier():
 @pytest.fixture
 def monitor(mock_notifier):
     """QualityMonitor with mocked notifier."""
-    from quality_monitor import QualityMonitor
+    from src.quality_monitor import QualityMonitor
     return QualityMonitor(mock_notifier)
 
 
