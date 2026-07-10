@@ -97,3 +97,9 @@ tests/audio_samples/
 # One-off helper scripts (not part of the app)
 extract_*.py
 send_*.py
+/find_*.py
+/list_*.py
+
+# Server runtime data (may contain personal speech/transcripts)
+TranscriberServer/results/
+TranscriberServer/uploads/

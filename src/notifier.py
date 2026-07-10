@@ -10,14 +10,12 @@ Usage:
 import asyncio
 import os
 from datetime import datetime
-from pathlib import Path
 
-_ENV_PATH = Path.home() / ".claude" / "REDACTED-PATH" / "blogger" / ".env"
-_SESSION_PATH = str(
-    Path.home() / ".claude" / "REDACTED-PATH" / "blogger" / "sessions" / "telegram_session"
-)
+from .dev_keys import load_env_var, telegram_session_path
 
 _MAX_MESSAGE_LEN = 4000  # Telegram limit is 4096, leave margin
+_MAX_QUEUED_MESSAGES = 50  # cap unsent_notifications.txt growth
+_SEND_TIMEOUT_SEC = 10  # network send must never hang callers
 
 
 class TelegramNotifier:
@@ -30,17 +28,14 @@ class TelegramNotifier:
         self.crash_dir = crash_dir
         self.unsent_path = os.path.join(crash_dir, "unsent_notifications.txt")
 
-        # Load credentials from .env (best-effort)
-        try:
-            from dotenv import load_dotenv
-            load_dotenv(_ENV_PATH)
-        except ImportError:
-            pass
-
-        raw_id = os.environ.get("TELEGRAM_API_ID")
+        # Credentials: environment-first, optional TRANSKRIBATOR_KEYSTORE
+        raw_id = load_env_var("TELEGRAM_API_ID")
         self._api_id = int(raw_id) if raw_id else None
-        self._api_hash = os.environ.get("TELEGRAM_API_HASH")
-        self._session_path = _SESSION_PATH
+        self._api_hash = load_env_var("TELEGRAM_API_HASH")
+        self._session_path = os.environ.get("TELEGRAM_SESSION_PATH") or telegram_session_path()
+
+    def has_credentials(self) -> bool:
+        return bool(self._api_id and self._api_hash and self._session_path)
 
     def format_crash_report(self, report):
         """Format crash report dict into a human-readable Telegram message."""
@@ -85,9 +80,9 @@ class TelegramNotifier:
     def _try_send(self, message):
         """Attempt to send via Telegram. Returns True on success, no fallback."""
         try:
-            if not self._api_id or not self._api_hash:
+            if not self.has_credentials():
                 return False
-            asyncio.run(self._send_async(message))
+            asyncio.run(asyncio.wait_for(self._send_async(message), timeout=_SEND_TIMEOUT_SEC))
             return True
         except Exception:
             return False
@@ -96,11 +91,21 @@ class TelegramNotifier:
         """Send message to Telegram, fall back to file on failure."""
         if self._try_send(message):
             return True
+        return self.queue_for_next_start(message)
+
+    def queue_for_next_start(self, message):
+        """Queue message on disk WITHOUT any network I/O (safe in crash paths).
+
+        No-op when Telegram credentials are absent — otherwise the queue file
+        would grow forever on machines that can never send it.
+        """
+        if not self.has_credentials():
+            return False
         try:
             self._fallback_to_file(message)
+            return True
         except Exception:
-            pass
-        return False
+            return False
 
     async def _send_async(self, message):
         """Connect to Telegram and send message to Saved Messages."""
@@ -116,11 +121,21 @@ class TelegramNotifier:
             await client.disconnect()
 
     def _fallback_to_file(self, message):
-        """Append message to unsent_notifications.txt."""
+        """Append message to unsent_notifications.txt (capped at _MAX_QUEUED_MESSAGES)."""
         os.makedirs(os.path.dirname(self.unsent_path), exist_ok=True)
         with open(self.unsent_path, "a", encoding="utf-8") as f:
             f.write(message)
             f.write("\n---END_MESSAGE---\n")
+        try:
+            with open(self.unsent_path, "r", encoding="utf-8") as f:
+                messages = [m.strip() for m in f.read().split("---END_MESSAGE---") if m.strip()]
+            if len(messages) > _MAX_QUEUED_MESSAGES:
+                with open(self.unsent_path, "w", encoding="utf-8") as f:
+                    for msg in messages[-_MAX_QUEUED_MESSAGES:]:
+                        f.write(msg)
+                        f.write("\n---END_MESSAGE---\n")
+        except Exception:
+            pass
 
     def send_unsent(self):
         """Retry sending queued messages. Returns count of successfully sent."""

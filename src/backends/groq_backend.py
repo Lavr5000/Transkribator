@@ -1,10 +1,9 @@
 """Groq Whisper cloud backend with automatic Sherpa fallback."""
 import io
 import logging
-import os
+import threading
 import time
 import wave
-from pathlib import Path
 from typing import Callable, Optional, Tuple
 
 import numpy as np
@@ -21,6 +20,29 @@ except ImportError:
     Groq = None
 
 GROQ_API_TIMEOUT = 15  # seconds (enough for ~2-3 min audio)
+GROQ_FAILURE_COOLDOWN = 60  # seconds: after a failure, skip Groq and go straight to fallback
+
+# Module-level failure state (single endpoint/key in this app).
+# time.monotonic() — wall-clock jumps must not shorten/extend the cooldown.
+_failure_lock = threading.Lock()
+_last_failure_mono = 0.0
+
+
+def _groq_in_cooldown() -> bool:
+    with _failure_lock:
+        return (time.monotonic() - _last_failure_mono) < GROQ_FAILURE_COOLDOWN if _last_failure_mono else False
+
+
+def _mark_groq_failure():
+    global _last_failure_mono
+    with _failure_lock:
+        _last_failure_mono = time.monotonic()
+
+
+def _mark_groq_success():
+    global _last_failure_mono
+    with _failure_lock:
+        _last_failure_mono = 0.0
 
 
 class GroqBackend(BaseBackend):
@@ -57,15 +79,9 @@ class GroqBackend(BaseBackend):
 
     @staticmethod
     def _ensure_groq_api_key():
-        """Load GROQ_API_KEY from blogger .env if not already in environment."""
-        if os.environ.get("GROQ_API_KEY"):
-            return
-        env_path = Path.home() / ".claude" / "REDACTED-PATH" / "blogger" / ".env"
-        if env_path.exists():
-            for line in env_path.read_text(encoding="utf-8").splitlines():
-                if line.startswith("GROQ_API_KEY="):
-                    os.environ["GROQ_API_KEY"] = line.split("=", 1)[1].strip()
-                    return
+        """Resolve GROQ_API_KEY (environment-first, optional dev keystore)."""
+        from ..dev_keys import load_env_var
+        load_env_var("GROQ_API_KEY")
 
     def load_model(self):
         if not GROQ_AVAILABLE:
@@ -121,7 +137,9 @@ class GroqBackend(BaseBackend):
         if cancel_event and cancel_event.is_set():
             return "", 0.0
 
-        if self._client is not None:
+        if self._client is not None and _groq_in_cooldown():
+            logger.info("GROQ_COOLDOWN | recent failure, using Sherpa fallback without network attempt")
+        elif self._client is not None:
             try:
                 wav_bytes = self._numpy_to_wav_bytes(audio, sample_rate)
                 audio_duration = len(audio) / sample_rate
@@ -137,10 +155,13 @@ class GroqBackend(BaseBackend):
                 )
                 text = resp.text.strip()
                 elapsed = time.time() - start_time
+                _mark_groq_success()
                 logger.info("GROQ_API_OK | elapsed=%.2fs | text_len=%d", elapsed, len(text))
                 return text, elapsed
             except Exception as e:
-                logger.warning("GROQ_FALLBACK | reason=%s | falling back to sherpa", e)
+                _mark_groq_failure()
+                logger.warning("GROQ_FALLBACK | reason=%s | falling back to sherpa (cooldown %ds)",
+                               e, GROQ_FAILURE_COOLDOWN)
                 if self.on_progress:
                     self.on_progress("Groq failed, using Sherpa...")
 

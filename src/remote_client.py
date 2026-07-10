@@ -19,19 +19,13 @@ logger = logging.getLogger("transkribator")
 class RemoteTranscriptionClient:
     """Client for remote transcription with automatic fallback."""
 
-    # Server endpoints (Tailscale VPN first, then internet)
-    _DEFAULT_SERVERS = [
-        "http://REDACTED-TS-IP:8000",  # Tailscale IP (WIN-1FQKL540GRF) - IP updated 2026-01-23
-        "http://REDACTED-TUNNEL.serveo.net:8000"  # Through serveo.net (backup)
-    ]
-
     @classmethod
     def _get_servers(cls):
-        """Get server list from env var or defaults."""
+        """Get server list from TRANSKRIBATOR_REMOTE_SERVERS (no hardcoded defaults)."""
         env_servers = os.environ.get("TRANSKRIBATOR_REMOTE_SERVERS")
         if env_servers:
             return [s.strip() for s in env_servers.split(",") if s.strip()]
-        return cls._DEFAULT_SERVERS
+        return []
 
     def __init__(
         self,

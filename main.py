@@ -14,37 +14,38 @@ Or after installation:
 
 import sys
 import os
-from pathlib import Path
 
 # Inject HuggingFace token so snapshot_download() can fetch VAD / punctuation
 # models. Anonymous access started returning 401 on 2026-04-05. Users should
 # set HF_TOKEN (or HUGGING_FACE_HUB_TOKEN) in their environment, or run
-# `huggingface-cli login` once. The block below is a dev-only convenience
-# that reads the token from the author's local keystore when present.
+# `huggingface-cli login` once. Developers may point TRANSKRIBATOR_KEYSTORE
+# at a directory with a .env file (see src/dev_keys.py).
 if not os.environ.get("HF_TOKEN") and not os.environ.get("HUGGING_FACE_HUB_TOKEN"):
-    _keystore_dir = Path.home() / ".claude" / "REDACTED-PATH" / "blogger"
-    if (_keystore_dir / "api_keys.py").exists():
-        try:
-            sys.path.insert(0, str(_keystore_dir))
-            from api_keys import get_key  # type: ignore
-            _hf = get_key("huggingface")
-            if _hf:
-                os.environ["HF_TOKEN"] = _hf
-                os.environ["HUGGING_FACE_HUB_TOKEN"] = _hf
-        except Exception as _e:
-            print(f"[main] HF token injection from keystore failed: {_e}", file=sys.stderr)
+    try:
+        from src.dev_keys import load_env_var
+        _hf = load_env_var("HF_TOKEN") or load_env_var("HUGGINGFACE_API_KEY")
+        if _hf:
+            os.environ["HF_TOKEN"] = _hf
+            os.environ["HUGGING_FACE_HUB_TOKEN"] = _hf
+    except Exception as _e:
+        print(f"[main] HF token lookup failed: {_e}", file=sys.stderr)
 
 # Install CrashReporter early — before any native library imports
 from src.crash_reporter import CrashReporter
 crash_reporter = CrashReporter()
 crash_reporter.install()
 
-# Retry unsent Telegram notifications from previous crashes
-try:
-    from src.notifier import TelegramNotifier
-    TelegramNotifier(crash_dir=crash_reporter.crash_dir).send_unsent()
-except Exception:
-    pass
+# Retry unsent Telegram notifications from previous crashes.
+# Runs in a daemon thread so a slow/unreachable Telegram never delays startup.
+def _retry_unsent_notifications():
+    try:
+        from src.notifier import TelegramNotifier
+        TelegramNotifier(crash_dir=crash_reporter.crash_dir).send_unsent()
+    except Exception:
+        pass
+
+import threading
+threading.Thread(target=_retry_unsent_notifications, daemon=True).start()
 
 
 def check_dependencies():
