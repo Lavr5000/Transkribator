@@ -148,10 +148,17 @@ class SettingsDialog(QDialog):
         backend_group = QGroupBox("Движок")
         backend_layout = QVBoxLayout(backend_group)
         self.backend_combo = QComboBox()
+        from src.backends import backend_available
         for bid, bname in BACKENDS.items():
+            # Hide backends whose core dependency is absent (frozen EXE
+            # ships sherpa only; others need a source install with extras)
+            if not backend_available(bid):
+                continue
             self.backend_combo.addItem(bname, bid)
         if self.config:
-            self.backend_combo.setCurrentIndex(list(BACKENDS.keys()).index(self.config.backend))
+            idx = self.backend_combo.findData(self.config.backend)
+            if idx >= 0:
+                self.backend_combo.setCurrentIndex(idx)
         backend_layout.addWidget(self.backend_combo)
         advanced_layout.addWidget(backend_group)
 

@@ -118,7 +118,11 @@ class HybridTranscriptionThread(QThread):
                 # Use threading.Timer to implement timeout
                 import concurrent.futures
 
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                # NOT a context manager: `with` calls shutdown(wait=True) on
+                # timeout, blocking this thread until the local transcription
+                # finishes anyway — the remote fallback would never be faster.
+                executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+                try:
                     future = executor.submit(
                         self.transcriber.transcribe,
                         self.audio,
@@ -140,6 +144,8 @@ class HybridTranscriptionThread(QThread):
                         self.transcriber.cancel()
                         logger.debug("Local transcription timeout (%.1fs)", self._local_timeout)
                         raise Exception("Local transcription timeout")
+                finally:
+                    executor.shutdown(wait=False)
 
             except Exception as local_error:
                 # Local transcription failed - try remote fallback
@@ -574,7 +580,7 @@ class MainWindow(QMainWindow):
             self.status_update.emit("Готово" if success else "Ошибка загрузки")
         threading.Thread(target=_load_with_status, daemon=True).start()
 
-    def _cleanup_thread(self):
+    def _cleanup_thread(self, timeout_ms: int = 2000):
         """Safely cleanup the transcription thread."""
         if self._thread is not None:
             try:
@@ -589,12 +595,18 @@ class MainWindow(QMainWindow):
                     pass  # Already disconnected
                 # Wait for thread to finish (with timeout)
                 if self._thread.isRunning():
-                    self._thread.wait(2000)  # 2 second timeout
+                    self._thread.wait(timeout_ms)
+                if self._thread.isRunning():
+                    # Still alive after the wait: deleting a running QThread
+                    # is undefined behavior — leave it, report not-finished.
+                    logger.warning("THREAD_STILL_RUNNING | not deleting live QThread")
+                    return False
                 # Schedule for deletion
                 self._thread.deleteLater()
             except RuntimeError:
                 pass  # Thread already deleted
             self._thread = None
+        return True
 
     def _on_thread_finished(self):
         """Called when QThread finishes (after run() completes)."""
@@ -1047,6 +1059,15 @@ class MainWindow(QMainWindow):
 
     def _backend_changed(self):
         bid = self._settings.backend_combo.currentData()
+        if self._processing and bid != self.config.backend:
+            # Engine is transcribing: reject and revert the combo
+            self.status_update.emit("Дождитесь окончания транскрибации")
+            self._settings.backend_combo.blockSignals(True)
+            idx = self._settings.backend_combo.findData(self.config.backend)
+            if idx >= 0:
+                self._settings.backend_combo.setCurrentIndex(idx)
+            self._settings.backend_combo.blockSignals(False)
+            return
         if bid != self.config.backend:
             old_backend = self.config.backend
             old_model = self.config.model_size
@@ -1061,7 +1082,8 @@ class MainWindow(QMainWindow):
                 default = {"whisper": "base", "sherpa": "giga-am-v3-ru", "podlodka-turbo": "podlodka-turbo", "groq": "whisper-large-v3-turbo"}.get(bid, "base")
                 self.config.model_size = default
                 self.config.save()
-                self.transcriber.switch_backend(bid, default)
+                if not self.transcriber.switch_backend(bid, default):
+                    raise RuntimeError("транскрибатор занят, попробуйте после окончания")
                 self._load_model()
                 self._update_model_info_label()
             except Exception as e:
@@ -1077,6 +1099,14 @@ class MainWindow(QMainWindow):
 
     def _model_changed(self):
         mid = self._settings.model_combo.currentData()
+        if self._processing and mid and mid != self.config.model_size:
+            self.status_update.emit("Дождитесь окончания транскрибации")
+            self._settings.model_combo.blockSignals(True)
+            idx = self._settings.model_combo.findData(self.config.model_size)
+            if idx >= 0:
+                self._settings.model_combo.setCurrentIndex(idx)
+            self._settings.model_combo.blockSignals(False)
+            return
         if mid and mid != self.config.model_size:
             # Check RAM requirement
             meta = MODEL_METADATA.get(mid, {})
@@ -1103,7 +1133,8 @@ class MainWindow(QMainWindow):
             try:
                 self.config.model_size = mid
                 self.config.save()
-                self.transcriber.switch_backend(self.config.backend, mid)
+                if not self.transcriber.switch_backend(self.config.backend, mid):
+                    raise RuntimeError("транскрибатор занят, попробуйте после окончания")
                 self._load_model()
                 self._update_model_info_label()
             except Exception as e:
@@ -1154,27 +1185,43 @@ class MainWindow(QMainWindow):
         """Handle quality profile change."""
         try:
             if profile != self.config.quality_profile:
+                if self._processing:
+                    self.status_update.emit("Дождитесь окончания транскрибации")
+                    btn = self._settings.quality_profile_buttons.get(self.config.quality_profile) if self._settings else None
+                    if btn is not None:
+                        btn.setChecked(True)  # revert; handler no-ops on same profile
+                    return
                 cr = get_reporter()
                 if cr:
                     cr.set_context("QUALITY_PROFILE_CHANGE", profile=profile)
                 # Apply profile preset
                 self.config.apply_quality_profile(profile)
 
-                # Update transcriber settings
-                self.transcriber.switch_backend(self.config.backend, self.config.model_size)
+                # Update transcriber settings. VAD params BEFORE switch_backend:
+                # the construction fingerprint includes them, so the rebuild
+                # picks up the new values (mutating after would be lost).
+                self.transcriber.vad_enabled = self.config.vad_enabled
                 self.transcriber.vad_threshold = self.config.vad_threshold
                 self.transcriber.min_silence_duration_ms = self.config.min_silence_duration_ms
                 self.transcriber.enable_post_processing = self.config.enable_post_processing
+                if not self.transcriber.switch_backend(self.config.backend, self.config.model_size):
+                    raise RuntimeError("транскрибатор занят, попробуйте после окончания")
+                self._load_model()
 
-                # Update UI controls to reflect new values
+                # Update UI controls to reflect new values (block signals:
+                # combo mutations must not re-fire _backend/_model_changed
+                # with intermediate garbage values)
                 if self._settings:
-                    # Update backend combo
-                    backend_idx = self._settings.backend_combo.findData(self.config.backend)
-                    if backend_idx >= 0:
-                        self._settings.backend_combo.setCurrentIndex(backend_idx)
-
-                    # Update model combo (will refresh based on backend)
-                    self._settings._update_model_options()
+                    self._settings.backend_combo.blockSignals(True)
+                    self._settings.model_combo.blockSignals(True)
+                    try:
+                        backend_idx = self._settings.backend_combo.findData(self.config.backend)
+                        if backend_idx >= 0:
+                            self._settings.backend_combo.setCurrentIndex(backend_idx)
+                        self._settings._update_model_options()
+                    finally:
+                        self._settings.backend_combo.blockSignals(False)
+                        self._settings.model_combo.blockSignals(False)
 
                 logger.info("QUALITY_PROFILE_CHANGED | %s", profile)
         except Exception as e:
@@ -1347,14 +1394,23 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
-        # Cleanup transcription thread
-        self._cleanup_thread()
-
-        # Unload model to free memory
+        # Cancel any in-flight transcription, then wait for the worker
         try:
-            self.transcriber.unload_model()
+            self.transcriber.cancel()
         except Exception:
             pass
+        thread_finished = self._cleanup_thread(timeout_ms=10000)
+
+        # Unload model ONLY when the worker actually finished: unloading
+        # under a live native decode corrupts the process. If it is still
+        # running after 10s, skip unload — process exit reclaims memory.
+        if thread_finished:
+            try:
+                self.transcriber.unload_model()
+            except Exception:
+                pass
+        else:
+            logger.warning("QUIT_SKIP_UNLOAD | transcription still running after 10s wait")
 
         self.hotkey_manager.unregister()
         self.mouse_handler.stop()

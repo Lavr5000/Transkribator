@@ -109,8 +109,14 @@ class SherpaBackend(BaseBackend):
         cpu_count = os.cpu_count() or 4
         self.num_threads = max(1, min(num_threads or cpu_count, 8)) if num_threads is not None else max(1, min(cpu_count, 8))
         self._recognizer = None
-        self._loading = False
         self._lock = threading.Lock()
+        # Load coordination: event starts SIGNALED (no load in flight);
+        # cleared only while a real load runs. Generation token invalidates
+        # in-flight loads on unload/switch so a stale load can't publish.
+        self._load_done = threading.Event()
+        self._load_done.set()
+        self._load_error = None
+        self._load_generation = 0
         # Cache for model files check result
         self._model_files_checked = None
 
@@ -203,14 +209,11 @@ class SherpaBackend(BaseBackend):
                 self.on_progress("Error: sherpa-onnx not installed")
             raise RuntimeError("sherpa-onnx not installed. Run: pip install sherpa-onnx")
 
+        if self._wait_if_loading_elsewhere():
+            return
+
         with self._lock:
-            if self._recognizer is not None:
-                return
-
-            if self._loading:
-                return
-
-            self._loading = True
+            my_generation = self._load_generation
 
         try:
             model_dir = self._get_model_dir()
@@ -231,7 +234,7 @@ class SherpaBackend(BaseBackend):
             if model_file.exists():
                 # CTC model (GigaAM uses 64 mel bins per ai-sage/GigaAM spec,
                 # confirmed via ONNX metadata preprocessor.featurizer.n_mels=64)
-                self._recognizer = sherpa_onnx.OfflineRecognizer.from_nemo_ctc(
+                recognizer = sherpa_onnx.OfflineRecognizer.from_nemo_ctc(
                     model=str(model_file),
                     tokens=str(tokens_file),
                     num_threads=self.num_threads,
@@ -249,7 +252,7 @@ class SherpaBackend(BaseBackend):
                 decoder_file = model_dir / "decoder.onnx"
                 joiner_file = model_dir / "joiner.onnx"
 
-                self._recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
+                recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
                     encoder=str(encoder_file),
                     decoder=str(decoder_file),
                     joiner=str(joiner_file),
@@ -261,7 +264,7 @@ class SherpaBackend(BaseBackend):
                 )
 
             # Initialize Silero VAD if enabled
-            self._vad = None
+            vad = None
             if self._vad_enabled:
                 try:
                     vad_dir = self._get_vad_model_dir()
@@ -286,23 +289,66 @@ class SherpaBackend(BaseBackend):
                             sample_rate=16000,
                             num_threads=1,
                         )
-                        self._vad = sherpa_onnx.VadModel.create(vad_config)
+                        vad = sherpa_onnx.VadModel.create(vad_config)
                         logger.debug("VAD_INIT | threshold=%.2f | model=%s", self._vad_threshold, vad_model_path.name)
                 except Exception as e:
                     logger.warning("VAD_INIT_FAILED | %s", e)
-                    self._vad = None
+                    vad = None
+
+            self._publish_loaded(my_generation, recognizer, vad)
 
         except Exception as e:
+            self._load_error = e
             if self.on_progress:
                 self.on_progress(f"Error loading Sherpa-ONNX: {e}")
             raise
         finally:
-            self._loading = False
+            self._load_done.set()
+
+    def _wait_if_loading_elsewhere(self) -> bool:
+        """Coordinate concurrent load_model() calls.
+
+        Returns True when this call should return immediately (model already
+        loaded, or another thread finished loading it). Raises if the other
+        thread's load failed or timed out. When False is returned, this
+        thread OWNS the load (_load_done is cleared, _load_error reset).
+        """
+        while True:
+            with self._lock:
+                if self._recognizer is not None:
+                    return True
+                if self._load_done.is_set():
+                    # No load in flight — take ownership
+                    self._load_done.clear()
+                    self._load_error = None
+                    return False
+            # Another thread is loading: wait for it instead of returning
+            # with recognizer=None (the old early-return crash bug)
+            if not self._load_done.wait(timeout=120):
+                raise TimeoutError("Model load by another thread timed out")
+            with self._lock:
+                if self._recognizer is not None:
+                    return True
+                if self._load_error is not None:
+                    raise RuntimeError(f"Model load failed in another thread: {self._load_error}")
+            # Neither loaded nor failed (e.g. stale load discarded) — retry loop
+
+    def _publish_loaded(self, my_generation: int, recognizer, vad):
+        """Publish load result only if no unload/switch happened meanwhile."""
+        with self._lock:
+            if self._load_generation == my_generation:
+                self._recognizer = recognizer
+                self._vad = vad
+            else:
+                logger.info("LOAD_STALE_DISCARDED | generation %d != %d (unloaded during load)",
+                            my_generation, self._load_generation)
 
     def unload_model(self):
         """Unload the model to free memory."""
         with self._lock:
+            self._load_generation += 1  # invalidate any in-flight load
             self._recognizer = None
+            self._vad = None
             gc.collect()
 
     def _transcribe_single_chunk(self, chunk: np.ndarray, chunk_index: int) -> str:

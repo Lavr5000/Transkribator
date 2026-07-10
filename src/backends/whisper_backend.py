@@ -44,8 +44,12 @@ class WhisperBackend(BaseBackend):
     ):
         super().__init__(model_size, device, compute_type, language, on_progress)
         self._model = None
-        self._loading = False
         self._lock = threading.Lock()
+        # Load coordination (see sherpa_backend for the pattern rationale)
+        self._load_done = threading.Event()
+        self._load_done.set()
+        self._load_error = None
+        self._load_generation = 0
         self._detected_device = device
         self._detected_compute_type = compute_type
 
@@ -111,14 +115,11 @@ class WhisperBackend(BaseBackend):
                 self.on_progress("Error: Whisper not installed")
             raise RuntimeError("Whisper not installed")
 
+        if self._wait_if_loading_elsewhere():
+            return
+
         with self._lock:
-            if self._model is not None:
-                return
-
-            if self._loading:
-                return
-
-            self._loading = True
+            my_generation = self._load_generation
 
         try:
             device, compute_type = self._detect_device()
@@ -126,17 +127,17 @@ class WhisperBackend(BaseBackend):
             self._detected_compute_type = compute_type
 
             if WHISPER_BACKEND == "faster-whisper":
-                self._model = WhisperModel(
+                model = WhisperModel(
                     self.model_size,
                     device=device,
                     compute_type=compute_type
                 )
             else:
                 # OpenAI Whisper
-                self._model = whisper.load_model(self.model_size, device=device)
+                model = whisper.load_model(self.model_size, device=device)
 
             # Initialize Silero VAD if enabled
-            self._vad = None
+            vad = None
             if self._vad_enabled:
                 try:
                     vad_dir = self._get_vad_model_dir()
@@ -161,23 +162,52 @@ class WhisperBackend(BaseBackend):
                             sample_rate=16000,
                             num_threads=1,
                         )
-                        self._vad = sherpa_onnx.VadModel.create(vad_config)
+                        vad = sherpa_onnx.VadModel.create(vad_config)
                         logger.info("VAD_READY | model=%s", vad_model_path.name)
                 except Exception as e:
                     logger.warning("VAD_INIT_FAILED | %s", e)
-                    self._vad = None
+                    vad = None
+
+            with self._lock:
+                if self._load_generation == my_generation:
+                    self._model = model
+                    self._vad = vad
+                else:
+                    logger.info("LOAD_STALE_DISCARDED | generation %d != %d",
+                                my_generation, self._load_generation)
 
         except Exception as e:
+            self._load_error = e
             if self.on_progress:
                 self.on_progress(f"Error loading Whisper model: {e}")
             raise
         finally:
-            self._loading = False
+            self._load_done.set()
+
+    def _wait_if_loading_elsewhere(self) -> bool:
+        """See sherpa_backend._wait_if_loading_elsewhere — same coordination."""
+        while True:
+            with self._lock:
+                if self._model is not None:
+                    return True
+                if self._load_done.is_set():
+                    self._load_done.clear()
+                    self._load_error = None
+                    return False
+            if not self._load_done.wait(timeout=300):
+                raise TimeoutError("Model load by another thread timed out")
+            with self._lock:
+                if self._model is not None:
+                    return True
+                if self._load_error is not None:
+                    raise RuntimeError(f"Model load failed in another thread: {self._load_error}")
 
     def unload_model(self):
         """Unload the model to free memory."""
         with self._lock:
+            self._load_generation += 1  # invalidate any in-flight load
             self._model = None
+            self._vad = None
             # Force garbage collection
             gc.collect()
             try:
