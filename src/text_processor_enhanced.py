@@ -45,7 +45,7 @@ except ImportError:
 class EnhancedTextProcessor(TextProcessor):
     """Enhanced text processor with punctuation restoration and Sherpa-specific corrections."""
 
-    def __init__(self, language: str = "ru", enable_corrections: bool = True, enable_punctuation: bool = True, enable_phonetics: bool = True, enable_morphology: bool = True, enable_proper_nouns: bool = True, backend: str = "sherpa", user_dictionary: list = None):
+    def __init__(self, language: str = "ru", enable_corrections: bool = True, enable_punctuation: bool = True, enable_phonetics: bool = True, enable_morphology: bool = True, enable_proper_nouns: bool = True, backend: str = "sherpa", model_size: str = None, user_dictionary: list = None):
         """
         Initialize enhanced text processor.
 
@@ -57,10 +57,13 @@ class EnhancedTextProcessor(TextProcessor):
             enable_morphology: Whether to enable morphological corrections (gender, case)
             enable_proper_nouns: Whether to enable proper noun capitalization
             backend: Backend type for adaptive processing ("whisper", "sherpa", "podlodkaturbo")
+            model_size: Model identifier; "-punct" models emit punctuation themselves,
+                so ML punctuation restoration is skipped for them
             user_dictionary: User-defined correction entries [{"wrong": str, "correct": str, "case_sensitive": bool}]
         """
         self.language = language
         self.backend = backend.lower()
+        self.model_size = (model_size or "").lower()
         self.enable_corrections = enable_corrections
         self.user_dictionary = user_dictionary or []
 
@@ -94,17 +97,23 @@ class EnhancedTextProcessor(TextProcessor):
             enable_morphology: Base preference for morphological corrections
             enable_proper_nouns: Base preference for proper noun capitalization
         """
-        if self.backend == "whisper":
-            # Whisper already provides punctuation and capitalization
+        # Whisper-family models (incl. Podlodka fine-tune and Groq cloud Whisper)
+        # emit punctuation and capitalization themselves.
+        whisper_like = self.backend in ("whisper", "podlodkaturbo", "podlodka-turbo", "groq")
+        # Sherpa "-punct" models (e.g. giga-am-v3-ru-punct, the app default)
+        # also emit punctuation: running the ~560M-param XLM-R restoration
+        # model on top would double punctuation AND dominate hot-path latency.
+        model_emits_punctuation = "-punct" in self.model_size
+
+        if whisper_like:
             # Skip punctuation restoration to avoid double punctuation
             # Skip advanced corrections (Whisper has fewer phonetic/morphological errors)
             self.enable_punctuation = False
             self.enable_phonetics = False
             self.enable_morphology = False
         else:
-            # Sherpa, Podlodka: No punctuation, raw lowercase text
-            # Enable full processing pipeline
-            self.enable_punctuation = True
+            # Sherpa CTC without built-in punctuation: full pipeline
+            self.enable_punctuation = not model_emits_punctuation
             self.enable_phonetics = enable_phonetics and PHONETICS_AVAILABLE
             self.enable_morphology = enable_morphology and MORPHOLOGY_AVAILABLE
 
