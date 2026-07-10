@@ -7,7 +7,7 @@ Uses singleton pattern for pymorphy2.MorphAnalyzer to avoid performance issues.
 import re
 from typing import Optional, List, Tuple
 
-from .morph_singleton import PYMORPHY2_AVAILABLE, get_morph
+from .morph_singleton import get_morph
 
 
 class MorphologyCorrector:
@@ -33,7 +33,7 @@ class MorphologyCorrector:
         Returns:
             List of Parse objects from pymorphy2, or None if unavailable
         """
-        if not PYMORPHY2_AVAILABLE:
+        if self._morph is None:
             return None
 
         # Check cache first
@@ -59,7 +59,7 @@ class MorphologyCorrector:
         Returns:
             Text with corrected gender agreement
         """
-        if not PYMORPHY2_AVAILABLE:
+        if self._morph is None:
             return text
 
         words = text.split()
@@ -111,7 +111,7 @@ class MorphologyCorrector:
         Returns:
             Text with corrected case endings
         """
-        if not PYMORPHY2_AVAILABLE:
+        if self._morph is None:
             return text
 
         words = text.split()
@@ -142,7 +142,7 @@ class MorphologyCorrector:
         Returns:
             Corrected text
         """
-        if not PYMORPHY2_AVAILABLE:
+        if self._morph is None:
             return text
 
         # Apply gender agreement corrections

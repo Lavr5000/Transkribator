@@ -40,6 +40,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+nlp = [
+    "pymorphy3>=2.0.0",
+    "pymorphy3-dicts-ru",
+]
 whisper = [
     "faster-whisper>=1.0.0",
 ]

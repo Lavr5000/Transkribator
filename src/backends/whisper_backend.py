@@ -1,5 +1,6 @@
 """Whisper backend implementation using faster-whisper or openai-whisper."""
 import gc
+import logging
 import sys
 import threading
 import time
@@ -9,13 +10,7 @@ import numpy as np
 
 from .base import BaseBackend
 
-# Import enhanced text processor
-try:
-    from src.text_processor_enhanced import EnhancedTextProcessor
-    ENHANCED_PROCESSOR_AVAILABLE = True
-except ImportError:
-    from src.text_processor import AdvancedTextProcessor
-    ENHANCED_PROCESSOR_AVAILABLE = False
+logger = logging.getLogger("transkribator")
 
 # Try faster-whisper first, fallback to openai-whisper
 WHISPER_BACKEND = None
@@ -60,15 +55,8 @@ class WhisperBackend(BaseBackend):
         self._vad_threshold = vad_threshold
         self._min_silence_duration_ms = min_silence_duration_ms
         self._min_speech_duration_ms = min_speech_duration_ms
-
-        # Initialize text processor with backend-aware configuration
-        if ENHANCED_PROCESSOR_AVAILABLE:
-            self.text_processor = EnhancedTextProcessor(
-                language=language,
-                backend=self.backend_name
-            )
-        else:
-            self.text_processor = AdvancedTextProcessor(language=language)
+        # Post-processing is Transcriber's job (single point) — backends
+        # return RAW model output. See base.BaseBackend.transcribe contract.
 
     def _detect_device(self) -> Tuple[str, str]:
         """Detect the best device and compute type."""
@@ -97,9 +85,9 @@ class WhisperBackend(BaseBackend):
         """Get Silero VAD model directory, download if missing."""
         from huggingface_hub import snapshot_download
 
-        # In PyInstaller frozen build use exe directory; in dev use source root
+        # In PyInstaller frozen build datas live under _MEIPASS; in dev use source root
         if hasattr(sys, '_MEIPASS'):
-            vad_dir = Path(sys.executable).parent / "models" / "sherpa" / "silero-vad"
+            vad_dir = Path(sys._MEIPASS) / "models" / "sherpa" / "silero-vad"
         else:
             vad_dir = Path(__file__).parent.parent.parent / "models" / "sherpa" / "silero-vad"
         vad_dir.mkdir(parents=True, exist_ok=True)
@@ -112,7 +100,7 @@ class WhisperBackend(BaseBackend):
                     local_dir_use_symlinks=False,
                 )
             except Exception as e:
-                print(f"Failed to download VAD model: {e}")
+                logger.warning("VAD_DOWNLOAD_FAILED | %s", e)
 
         return vad_dir
 
@@ -159,7 +147,7 @@ class WhisperBackend(BaseBackend):
                             vad_model_path = candidate
                             break
                     if vad_model_path is None:
-                        print(f"WhisperBackend: VAD model not found in {vad_dir}")
+                        logger.warning("VAD_MODEL_NOT_FOUND | dir=%s", vad_dir)
                     else:
                         import sherpa_onnx
                         silero_config = sherpa_onnx.SileroVadModelConfig(
@@ -174,9 +162,9 @@ class WhisperBackend(BaseBackend):
                             num_threads=1,
                         )
                         self._vad = sherpa_onnx.VadModel.create(vad_config)
-                        print(f"WhisperBackend: VAD initialized ({vad_model_path.name})")
+                        logger.info("VAD_READY | model=%s", vad_model_path.name)
                 except Exception as e:
-                    print(f"WhisperBackend: Failed to initialize VAD: {e}")
+                    logger.warning("VAD_INIT_FAILED | %s", e)
                     self._vad = None
 
         except Exception as e:
@@ -217,6 +205,9 @@ class WhisperBackend(BaseBackend):
         """
         if self._model is None:
             self.load_model()
+
+        if cancel_event is not None and cancel_event.is_set():
+            return "", 0.0
 
         start_time = time.time()
 
@@ -266,7 +257,7 @@ class WhisperBackend(BaseBackend):
                     else:
                         return "", 0.0
                 except Exception as e:
-                    print(f"WhisperBackend: VAD filtering failed: {e}")
+                    logger.warning("VAD_FILTER_FAILED | %s", e)
                     # Continue with original audio on VAD failure
 
             language = "ru"  # Force Russian for optimal accuracy
@@ -275,9 +266,10 @@ class WhisperBackend(BaseBackend):
                 segments, info = self._model.transcribe(
                     audio,
                     language=language,
-                    beam_size=5,  # Quality mode - optimal for Russian accuracy
+                    beam_size=2,  # 5 was ~2.5x slower per decode for marginal WER gain on dictation
                     temperature=0.0,  # Deterministic decoding, no hallucinations
-                    vad_filter=True,
+                    # Built-in VAD only when the custom Silero pass did not run
+                    vad_filter=self._vad_enabled and self._vad is None,
                     vad_parameters=dict(
                         min_silence_duration_ms=300,  # Optimized for Russian speech patterns
                         speech_pad_ms=400,  # Prevents cutting off word endings
@@ -295,15 +287,12 @@ class WhisperBackend(BaseBackend):
                 )
                 text = result["text"].strip()
 
-            # Apply text post-processing (backend-aware)
-            if hasattr(self, 'text_processor') and self.text_processor:
-                text = self.text_processor.process(text)
-
             process_time = time.time() - start_time
 
             return text, process_time
 
-        except Exception as e:
+        except Exception:
+            logger.error("WHISPER_TRANSCRIBE_FAILED", exc_info=True)
             return "", 0.0
 
     def is_model_loaded(self) -> bool:

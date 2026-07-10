@@ -1,8 +1,12 @@
 """Proper noun recognition and capitalization."""
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Set, Dict, List
+
+
+logger = logging.getLogger("transkribator")
 
 
 class ProperNounDict:
@@ -39,7 +43,7 @@ class ProperNounDict:
         self._load_names(data_dir / "names.json")
         self._load_countries(data_dir / "countries.json")
 
-        print(f"[INFO] ProperNounDict loaded: {self._stats}")
+        logger.info("PROPER_NOUNS_LOADED | %s", self._stats)
 
     def _load_json(self, path: Path) -> List[Dict]:
         """
@@ -56,10 +60,10 @@ class ProperNounDict:
                 with open(path, 'r', encoding='utf-8') as f:
                     return json.load(f)
             except Exception as e:
-                print(f"[WARNING] Failed to load {path}: {e}")
+                logger.warning("PROPER_NOUNS_LOAD_FAILED | %s | %s", path, e)
                 return []
         else:
-            print(f"[WARNING] File not found: {path}")
+            logger.warning("PROPER_NOUNS_FILE_NOT_FOUND | %s", path)
             return []
 
     def _load_cities(self, path: Path):

@@ -7,7 +7,7 @@ Handles voiced/unvoiced consonant substitutions common in ASR:
 import re
 from typing import Optional
 
-from .morph_singleton import PYMORPHY2_AVAILABLE as PYMORPHY_AVAILABLE, get_morph
+from .morph_singleton import get_morph
 
 
 # Voiced/unvoiced consonant pairs in Russian
@@ -41,10 +41,9 @@ class PhoneticCorrector:
             enable_validation: Whether to validate corrections against vocabulary.
                              If False, applies corrections more aggressively.
         """
-        self.enable_validation = enable_validation and PYMORPHY_AVAILABLE
-
-        # Use shared MorphAnalyzer singleton
-        self._morph = get_morph() if self.enable_validation else None
+        # Use shared MorphAnalyzer singleton (None when pymorphy is unavailable)
+        self._morph = get_morph() if enable_validation else None
+        self.enable_validation = enable_validation and self._morph is not None
 
     def _is_valid_russian_word(self, word: str) -> bool:
         """Check if word is valid Russian vocabulary.

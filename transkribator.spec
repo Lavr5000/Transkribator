@@ -14,13 +14,22 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 # Collect all data files from dependencies
 datas = []
 datas += collect_data_files('sherpa_onnx')
-# Project models (sherpa ONNX models for transcription)
-datas += [('models/sherpa/giga-am-v2-ru', 'models/sherpa/giga-am-v2-ru')]
-datas += [('models/sherpa/giga-am-v3-ru', 'models/sherpa/giga-am-v3-ru')]
+# Bundle ONLY the app's default model (giga-am-v3-ru-punct). Other models are
+# selectable but not bundled (v2.2.0 shipped v2+v3 — 442MB — while the actual
+# default v3-punct was absent, breaking offline first-run).
+datas += [('models/sherpa/giga-am-v3-ru-punct', 'models/sherpa/giga-am-v3-ru-punct')]
+# Silero VAD must ship locally: anonymous HuggingFace downloads 401 since 2026-04.
+datas += [('models/sherpa/silero-vad', 'models/sherpa/silero-vad')]
+# Proper-noun dictionaries (cities/names/countries) — capitalization is dead without them.
+datas += [('src/data', 'src/data')]
+# pymorphy3 dictionaries (lazy-imported, PyInstaller can't auto-detect the data files).
+datas += collect_data_files('pymorphy3')
+datas += collect_data_files('pymorphy3_dicts_ru')
 
 # Collect all submodules to ensure complete packaging
 hiddenimports = []
 hiddenimports += collect_submodules('sherpa_onnx')
+hiddenimports += ['pymorphy3', 'pymorphy3_dicts_ru']
 
 # PyQt6 modules (explicitly required)
 hiddenimports += [

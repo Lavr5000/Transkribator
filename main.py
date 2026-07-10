@@ -100,9 +100,11 @@ def check_dependencies():
         for dep in missing:
             print(f"  - {dep}")
         print("\nInstall with:")
-        print("  pip install -r requirements.txt")
-        print("\nOr for GPU acceleration:")
-        print("  pip install -r requirements-gpu.txt")
+        print("  pip install .")
+        print("\nOptional extras:")
+        print('  pip install ".[nlp]"      # morphology corrections')
+        print('  pip install ".[whisper]"  # Whisper backend')
+        print('  pip install ".[gpu]"      # CUDA acceleration')
         return False
 
     return True

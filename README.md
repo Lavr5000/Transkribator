@@ -49,9 +49,11 @@ git clone https://github.com/Lavr5000/Transkribator.git
 cd Transkribator
 python -m venv venv
 venv\Scripts\activate
-pip install -r requirements.txt
+pip install ".[nlp]"
 python main.py
 ```
+
+Optional extras: `.[whisper]` (Whisper backend), `.[groq]` (Groq cloud backend), `.[gpu]` (CUDA). The shipped EXE includes the Sherpa backend only — other backends work from a source install with the matching extra.
 
 ## Usage
 
