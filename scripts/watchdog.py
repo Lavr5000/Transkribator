@@ -16,10 +16,10 @@ import time
 import json
 import logging
 
-# Project root = parent of scripts/
+# Project root = parent of scripts/. src is a package (src.notifier uses
+# relative imports), so the ROOT goes on sys.path, not src/ itself.
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRC_DIR = os.path.join(PROJECT_ROOT, "src")
-sys.path.insert(0, SRC_DIR)
+sys.path.insert(0, PROJECT_ROOT)
 
 # Watchdog configuration
 MAX_RESTARTS = 3          # Max restarts within the time window
@@ -61,7 +61,7 @@ def _get_latest_crash_report():
 def _send_notification(message):
     """Send Telegram notification via TelegramNotifier."""
     try:
-        from notifier import TelegramNotifier
+        from src.notifier import TelegramNotifier
         notifier = TelegramNotifier(crash_dir=CRASH_DIR)
         notifier.send(message)
         logger.info("Telegram notification sent")

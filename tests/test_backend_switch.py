@@ -81,9 +81,12 @@ class TestBackendSwitch:
             with patch("src.transcriber.get_reporter", return_value=None):
                 transcriber.switch_backend("whisper", "base")
 
-        # Whisper uses AdvancedTextProcessor (not Enhanced)
-        from src.text_processor import AdvancedTextProcessor
-        assert isinstance(transcriber.text_processor, AdvancedTextProcessor)
+        # Single-point post-processing: Enhanced everywhere, configured
+        # per backend (whisper branch disables punctuation/phonetics/morph)
+        from src.text_processor_enhanced import EnhancedTextProcessor
+        assert isinstance(transcriber.text_processor, EnhancedTextProcessor)
+        assert transcriber.text_processor.backend == "whisper"
+        assert transcriber.text_processor.enable_punctuation is False
 
     def test_concurrent_switch_locked(self, transcriber):
         """Concurrent switch calls are serialized by lock."""

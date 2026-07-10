@@ -78,12 +78,15 @@ class ProperNounDict:
             # Add canonical name
             self._lookup.add(name.lower())
 
-            # Add all variants
+            # Add all variants. Map EVERY variant to the canonical form —
+            # including the one equal to name.lower(): skipping it meant a
+            # lowercase "андрей" never resolved to "Андрей" (capitalization
+            # silently dead for exact-canonical words). First entry wins so
+            # earlier (more common) names keep ambiguous nicknames.
+            self._variants.setdefault(name.lower(), name)
             for variant in variants:
                 self._lookup.add(variant.lower())
-                # Map variant to canonical form for capitalization
-                if variant.lower() != name.lower():
-                    self._variants[variant.lower()] = name
+                self._variants.setdefault(variant.lower(), name)
 
     def _load_names(self, path: Path):
         """Load names from JSON and populate lookup sets."""
@@ -97,12 +100,15 @@ class ProperNounDict:
             # Add canonical name
             self._lookup.add(name.lower())
 
-            # Add all variants
+            # Add all variants. Map EVERY variant to the canonical form —
+            # including the one equal to name.lower(): skipping it meant a
+            # lowercase "андрей" never resolved to "Андрей" (capitalization
+            # silently dead for exact-canonical words). First entry wins so
+            # earlier (more common) names keep ambiguous nicknames.
+            self._variants.setdefault(name.lower(), name)
             for variant in variants:
                 self._lookup.add(variant.lower())
-                # Map variant to canonical form for capitalization
-                if variant.lower() != name.lower():
-                    self._variants[variant.lower()] = name
+                self._variants.setdefault(variant.lower(), name)
 
     def _load_countries(self, path: Path):
         """Load countries from JSON and populate lookup sets."""
@@ -116,12 +122,15 @@ class ProperNounDict:
             # Add canonical name
             self._lookup.add(name.lower())
 
-            # Add all variants
+            # Add all variants. Map EVERY variant to the canonical form —
+            # including the one equal to name.lower(): skipping it meant a
+            # lowercase "андрей" never resolved to "Андрей" (capitalization
+            # silently dead for exact-canonical words). First entry wins so
+            # earlier (more common) names keep ambiguous nicknames.
+            self._variants.setdefault(name.lower(), name)
             for variant in variants:
                 self._lookup.add(variant.lower())
-                # Map variant to canonical form for capitalization
-                if variant.lower() != name.lower():
-                    self._variants[variant.lower()] = name
+                self._variants.setdefault(variant.lower(), name)
 
         # Update total
         self._stats["total"] = len(self._lookup)
