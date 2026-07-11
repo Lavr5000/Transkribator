@@ -213,22 +213,36 @@ class MainWindow(QMainWindow):
         self.recorder.auto_stop_silence_sec = self.config.auto_stop_silence_sec
         self.recorder.on_auto_stop = self._on_auto_stop
 
-        self.transcriber = Transcriber(
-            backend=self.config.backend,
-            model_size=self.config.model_size,
-            device=self.config.device,
-            compute_type=self.config.compute_type,
-            language=self.config.language,
-            on_progress=self._on_progress,
-            enable_post_processing=self.config.enable_post_processing,
-            # VAD config
-            vad_enabled=self.config.vad_enabled,
-            vad_threshold=self.config.vad_threshold,
-            min_silence_duration_ms=self.config.min_silence_duration_ms,
-            min_speech_duration_ms=self.config.min_speech_duration_ms,
-            # User dictionary
-            user_dictionary=self.config.user_dictionary,
-        )
+        def _make_transcriber(backend, model_size):
+            return Transcriber(
+                backend=backend,
+                model_size=model_size,
+                device=self.config.device,
+                compute_type=self.config.compute_type,
+                language=self.config.language,
+                on_progress=self._on_progress,
+                enable_post_processing=self.config.enable_post_processing,
+                # VAD config
+                vad_enabled=self.config.vad_enabled,
+                vad_threshold=self.config.vad_threshold,
+                min_silence_duration_ms=self.config.min_silence_duration_ms,
+                min_speech_duration_ms=self.config.min_speech_duration_ms,
+                # User dictionary
+                user_dictionary=self.config.user_dictionary,
+            )
+
+        try:
+            self.transcriber = _make_transcriber(self.config.backend, self.config.model_size)
+        except Exception as e:
+            # A stale config.json may point at a backend this install cannot
+            # provide (e.g. frozen EXE is sherpa-only). Fall back to the
+            # default instead of dying silently on startup.
+            logger.error("TRANSCRIBER_INIT_FALLBACK | backend=%s unavailable (%s), using sherpa",
+                         self.config.backend, e)
+            self.config.backend = "sherpa"
+            self.config.model_size = "giga-am-v3-ru-punct"
+            self.config.save()
+            self.transcriber = _make_transcriber("sherpa", "giga-am-v3-ru-punct")
 
         self.hotkey_manager = HotkeyManager(on_hotkey=self._on_hotkey)
         self.history_manager = HistoryManager(max_entries=50)

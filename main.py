@@ -157,7 +157,13 @@ def main():
     except SystemExit:
         raise  # don't intercept sys.exit()
     except Exception:
-        # excepthook already wrote the crash report
+        # sys.excepthook does NOT fire for caught exceptions — write the
+        # crash report explicitly, otherwise startup failures die silently
+        # with exit 1 and no trace anywhere (especially in windowed builds).
+        try:
+            crash_reporter.on_exception(*sys.exc_info())
+        except Exception:
+            pass
         sys.exit(1)
 
 

@@ -30,6 +30,19 @@ datas += collect_data_files('pymorphy3_dicts_ru')
 hiddenimports = []
 hiddenimports += collect_submodules('sherpa_onnx')
 hiddenimports += ['pymorphy3', 'pymorphy3_dicts_ru']
+# Backend modules are imported LAZILY by src.backends.get_backend(), so
+# PyInstaller cannot discover them statically — list them explicitly.
+# The modules themselves are thin; their heavy deps (torch/faster_whisper/
+# groq SDK) stay in `excludes`, each module degrades gracefully without them
+# (a stale config.json pointing at an unavailable backend must not crash
+# the frozen app — it falls back instead).
+hiddenimports += [
+    'src.backends.sherpa_backend',
+    'src.backends.whisper_backend',
+    'src.backends.podlodka_turbo_backend',
+    'src.backends.groq_backend',
+    'src.dev_keys',
+]
 
 # PyQt6 modules (explicitly required)
 hiddenimports += [
