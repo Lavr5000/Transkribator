@@ -1,5 +1,6 @@
 """Whisper backend implementation using faster-whisper or openai-whisper."""
 import gc
+import logging
 import sys
 import threading
 import time
@@ -9,13 +10,7 @@ import numpy as np
 
 from .base import BaseBackend
 
-# Import enhanced text processor
-try:
-    from src.text_processor_enhanced import EnhancedTextProcessor
-    ENHANCED_PROCESSOR_AVAILABLE = True
-except ImportError:
-    from src.text_processor import AdvancedTextProcessor
-    ENHANCED_PROCESSOR_AVAILABLE = False
+logger = logging.getLogger("transkribator")
 
 # Try faster-whisper first, fallback to openai-whisper
 WHISPER_BACKEND = None
@@ -49,8 +44,12 @@ class WhisperBackend(BaseBackend):
     ):
         super().__init__(model_size, device, compute_type, language, on_progress)
         self._model = None
-        self._loading = False
         self._lock = threading.Lock()
+        # Load coordination (see sherpa_backend for the pattern rationale)
+        self._load_done = threading.Event()
+        self._load_done.set()
+        self._load_error = None
+        self._load_generation = 0
         self._detected_device = device
         self._detected_compute_type = compute_type
 
@@ -60,15 +59,8 @@ class WhisperBackend(BaseBackend):
         self._vad_threshold = vad_threshold
         self._min_silence_duration_ms = min_silence_duration_ms
         self._min_speech_duration_ms = min_speech_duration_ms
-
-        # Initialize text processor with backend-aware configuration
-        if ENHANCED_PROCESSOR_AVAILABLE:
-            self.text_processor = EnhancedTextProcessor(
-                language=language,
-                backend=self.backend_name
-            )
-        else:
-            self.text_processor = AdvancedTextProcessor(language=language)
+        # Post-processing is Transcriber's job (single point) — backends
+        # return RAW model output. See base.BaseBackend.transcribe contract.
 
     def _detect_device(self) -> Tuple[str, str]:
         """Detect the best device and compute type."""
@@ -97,9 +89,9 @@ class WhisperBackend(BaseBackend):
         """Get Silero VAD model directory, download if missing."""
         from huggingface_hub import snapshot_download
 
-        # In PyInstaller frozen build use exe directory; in dev use source root
+        # In PyInstaller frozen build datas live under _MEIPASS; in dev use source root
         if hasattr(sys, '_MEIPASS'):
-            vad_dir = Path(sys.executable).parent / "models" / "sherpa" / "silero-vad"
+            vad_dir = Path(sys._MEIPASS) / "models" / "sherpa" / "silero-vad"
         else:
             vad_dir = Path(__file__).parent.parent.parent / "models" / "sherpa" / "silero-vad"
         vad_dir.mkdir(parents=True, exist_ok=True)
@@ -112,7 +104,7 @@ class WhisperBackend(BaseBackend):
                     local_dir_use_symlinks=False,
                 )
             except Exception as e:
-                print(f"Failed to download VAD model: {e}")
+                logger.warning("VAD_DOWNLOAD_FAILED | %s", e)
 
         return vad_dir
 
@@ -123,14 +115,11 @@ class WhisperBackend(BaseBackend):
                 self.on_progress("Error: Whisper not installed")
             raise RuntimeError("Whisper not installed")
 
+        if self._wait_if_loading_elsewhere():
+            return
+
         with self._lock:
-            if self._model is not None:
-                return
-
-            if self._loading:
-                return
-
-            self._loading = True
+            my_generation = self._load_generation
 
         try:
             device, compute_type = self._detect_device()
@@ -138,17 +127,17 @@ class WhisperBackend(BaseBackend):
             self._detected_compute_type = compute_type
 
             if WHISPER_BACKEND == "faster-whisper":
-                self._model = WhisperModel(
+                model = WhisperModel(
                     self.model_size,
                     device=device,
                     compute_type=compute_type
                 )
             else:
                 # OpenAI Whisper
-                self._model = whisper.load_model(self.model_size, device=device)
+                model = whisper.load_model(self.model_size, device=device)
 
             # Initialize Silero VAD if enabled
-            self._vad = None
+            vad = None
             if self._vad_enabled:
                 try:
                     vad_dir = self._get_vad_model_dir()
@@ -159,7 +148,7 @@ class WhisperBackend(BaseBackend):
                             vad_model_path = candidate
                             break
                     if vad_model_path is None:
-                        print(f"WhisperBackend: VAD model not found in {vad_dir}")
+                        logger.warning("VAD_MODEL_NOT_FOUND | dir=%s", vad_dir)
                     else:
                         import sherpa_onnx
                         silero_config = sherpa_onnx.SileroVadModelConfig(
@@ -173,23 +162,52 @@ class WhisperBackend(BaseBackend):
                             sample_rate=16000,
                             num_threads=1,
                         )
-                        self._vad = sherpa_onnx.VadModel.create(vad_config)
-                        print(f"WhisperBackend: VAD initialized ({vad_model_path.name})")
+                        vad = sherpa_onnx.VadModel.create(vad_config)
+                        logger.info("VAD_READY | model=%s", vad_model_path.name)
                 except Exception as e:
-                    print(f"WhisperBackend: Failed to initialize VAD: {e}")
-                    self._vad = None
+                    logger.warning("VAD_INIT_FAILED | %s", e)
+                    vad = None
+
+            with self._lock:
+                if self._load_generation == my_generation:
+                    self._model = model
+                    self._vad = vad
+                else:
+                    logger.info("LOAD_STALE_DISCARDED | generation %d != %d",
+                                my_generation, self._load_generation)
 
         except Exception as e:
+            self._load_error = e
             if self.on_progress:
                 self.on_progress(f"Error loading Whisper model: {e}")
             raise
         finally:
-            self._loading = False
+            self._load_done.set()
+
+    def _wait_if_loading_elsewhere(self) -> bool:
+        """See sherpa_backend._wait_if_loading_elsewhere — same coordination."""
+        while True:
+            with self._lock:
+                if self._model is not None:
+                    return True
+                if self._load_done.is_set():
+                    self._load_done.clear()
+                    self._load_error = None
+                    return False
+            if not self._load_done.wait(timeout=300):
+                raise TimeoutError("Model load by another thread timed out")
+            with self._lock:
+                if self._model is not None:
+                    return True
+                if self._load_error is not None:
+                    raise RuntimeError(f"Model load failed in another thread: {self._load_error}")
 
     def unload_model(self):
         """Unload the model to free memory."""
         with self._lock:
+            self._load_generation += 1  # invalidate any in-flight load
             self._model = None
+            self._vad = None
             # Force garbage collection
             gc.collect()
             try:
@@ -217,6 +235,9 @@ class WhisperBackend(BaseBackend):
         """
         if self._model is None:
             self.load_model()
+
+        if cancel_event is not None and cancel_event.is_set():
+            return "", 0.0
 
         start_time = time.time()
 
@@ -266,7 +287,7 @@ class WhisperBackend(BaseBackend):
                     else:
                         return "", 0.0
                 except Exception as e:
-                    print(f"WhisperBackend: VAD filtering failed: {e}")
+                    logger.warning("VAD_FILTER_FAILED | %s", e)
                     # Continue with original audio on VAD failure
 
             language = "ru"  # Force Russian for optimal accuracy
@@ -275,9 +296,10 @@ class WhisperBackend(BaseBackend):
                 segments, info = self._model.transcribe(
                     audio,
                     language=language,
-                    beam_size=5,  # Quality mode - optimal for Russian accuracy
+                    beam_size=2,  # 5 was ~2.5x slower per decode for marginal WER gain on dictation
                     temperature=0.0,  # Deterministic decoding, no hallucinations
-                    vad_filter=True,
+                    # Built-in VAD only when the custom Silero pass did not run
+                    vad_filter=self._vad_enabled and self._vad is None,
                     vad_parameters=dict(
                         min_silence_duration_ms=300,  # Optimized for Russian speech patterns
                         speech_pad_ms=400,  # Prevents cutting off word endings
@@ -295,15 +317,12 @@ class WhisperBackend(BaseBackend):
                 )
                 text = result["text"].strip()
 
-            # Apply text post-processing (backend-aware)
-            if hasattr(self, 'text_processor') and self.text_processor:
-                text = self.text_processor.process(text)
-
             process_time = time.time() - start_time
 
             return text, process_time
 
-        except Exception as e:
+        except Exception:
+            logger.error("WHISPER_TRANSCRIBE_FAILED", exc_info=True)
             return "", 0.0
 
     def is_model_loaded(self) -> bool:

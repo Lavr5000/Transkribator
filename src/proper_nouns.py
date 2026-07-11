@@ -1,8 +1,12 @@
 """Proper noun recognition and capitalization."""
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Set, Dict, List
+
+
+logger = logging.getLogger("transkribator")
 
 
 class ProperNounDict:
@@ -39,7 +43,7 @@ class ProperNounDict:
         self._load_names(data_dir / "names.json")
         self._load_countries(data_dir / "countries.json")
 
-        print(f"[INFO] ProperNounDict loaded: {self._stats}")
+        logger.info("PROPER_NOUNS_LOADED | %s", self._stats)
 
     def _load_json(self, path: Path) -> List[Dict]:
         """
@@ -56,10 +60,10 @@ class ProperNounDict:
                 with open(path, 'r', encoding='utf-8') as f:
                     return json.load(f)
             except Exception as e:
-                print(f"[WARNING] Failed to load {path}: {e}")
+                logger.warning("PROPER_NOUNS_LOAD_FAILED | %s | %s", path, e)
                 return []
         else:
-            print(f"[WARNING] File not found: {path}")
+            logger.warning("PROPER_NOUNS_FILE_NOT_FOUND | %s", path)
             return []
 
     def _load_cities(self, path: Path):
@@ -74,12 +78,15 @@ class ProperNounDict:
             # Add canonical name
             self._lookup.add(name.lower())
 
-            # Add all variants
+            # Add all variants. Map EVERY variant to the canonical form —
+            # including the one equal to name.lower(): skipping it meant a
+            # lowercase "андрей" never resolved to "Андрей" (capitalization
+            # silently dead for exact-canonical words). First entry wins so
+            # earlier (more common) names keep ambiguous nicknames.
+            self._variants.setdefault(name.lower(), name)
             for variant in variants:
                 self._lookup.add(variant.lower())
-                # Map variant to canonical form for capitalization
-                if variant.lower() != name.lower():
-                    self._variants[variant.lower()] = name
+                self._variants.setdefault(variant.lower(), name)
 
     def _load_names(self, path: Path):
         """Load names from JSON and populate lookup sets."""
@@ -93,12 +100,15 @@ class ProperNounDict:
             # Add canonical name
             self._lookup.add(name.lower())
 
-            # Add all variants
+            # Add all variants. Map EVERY variant to the canonical form —
+            # including the one equal to name.lower(): skipping it meant a
+            # lowercase "андрей" never resolved to "Андрей" (capitalization
+            # silently dead for exact-canonical words). First entry wins so
+            # earlier (more common) names keep ambiguous nicknames.
+            self._variants.setdefault(name.lower(), name)
             for variant in variants:
                 self._lookup.add(variant.lower())
-                # Map variant to canonical form for capitalization
-                if variant.lower() != name.lower():
-                    self._variants[variant.lower()] = name
+                self._variants.setdefault(variant.lower(), name)
 
     def _load_countries(self, path: Path):
         """Load countries from JSON and populate lookup sets."""
@@ -112,12 +122,15 @@ class ProperNounDict:
             # Add canonical name
             self._lookup.add(name.lower())
 
-            # Add all variants
+            # Add all variants. Map EVERY variant to the canonical form —
+            # including the one equal to name.lower(): skipping it meant a
+            # lowercase "андрей" never resolved to "Андрей" (capitalization
+            # silently dead for exact-canonical words). First entry wins so
+            # earlier (more common) names keep ambiguous nicknames.
+            self._variants.setdefault(name.lower(), name)
             for variant in variants:
                 self._lookup.add(variant.lower())
-                # Map variant to canonical form for capitalization
-                if variant.lower() != name.lower():
-                    self._variants[variant.lower()] = name
+                self._variants.setdefault(variant.lower(), name)
 
         # Update total
         self._stats["total"] = len(self._lookup)

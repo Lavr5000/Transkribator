@@ -12,19 +12,19 @@ from pathlib import Path
 from typing import Callable, Optional, Tuple
 import numpy as np
 
-from crash_reporter import get_reporter
+from .crash_reporter import get_reporter
 
 logger = logging.getLogger("transkribator")
 
-from text_processor import AdvancedTextProcessor
+from .text_processor import AdvancedTextProcessor
 
 # Try to import enhanced text processor with punctuation
 try:
-    from text_processor_enhanced import EnhancedTextProcessor
+    from .text_processor_enhanced import EnhancedTextProcessor
     ENHANCED_PROCESSOR_AVAILABLE = True
 except ImportError:
     ENHANCED_PROCESSOR_AVAILABLE = False
-from backends import get_backend, BaseBackend
+from .backends import get_backend, BaseBackend
 
 
 class Transcriber:
@@ -87,29 +87,49 @@ class Transcriber:
         self._lock = threading.Lock()
         self._cancel_event = threading.Event()
 
-        # Initialize text processor
-        lang_code = language if language != "auto" else "ru"
-
-        # Use EnhancedTextProcessor for Sherpa backend (better punctuation)
-        # Use AdvancedTextProcessor for Whisper (already has punctuation)
-        if backend == "sherpa" and ENHANCED_PROCESSOR_AVAILABLE:
-            self.text_processor = EnhancedTextProcessor(
-                language=lang_code,
-                enable_corrections=enable_post_processing,
-                enable_punctuation=True,  # Enable punctuation restoration
-                user_dictionary=self.user_dictionary,
-            )
-        else:
-            self.text_processor = AdvancedTextProcessor(
-                language=lang_code,
-                enable_corrections=enable_post_processing
-            )
-
-        # NOW set enable_post_processing (after text_processor is initialized)
+        # Set BEFORE building the processor (factory reads it)
         self._enable_post_processing = enable_post_processing
+
+        # Single post-processing point: backends return RAW model output,
+        # the Transcriber-level processor is the only one that runs.
+        self.text_processor = self._make_text_processor()
 
         # Create backend instance
         self._create_backend()
+
+    def _make_text_processor(self, backend_name: str = None, model_size: str = None):
+        """Build the backend-aware text processor (single construction point)."""
+        lang_code = self.language or "ru"
+        if ENHANCED_PROCESSOR_AVAILABLE:
+            return EnhancedTextProcessor(
+                language=lang_code,
+                enable_corrections=self._enable_post_processing,
+                backend=backend_name or self.backend_name,
+                model_size=model_size or self.model_size,
+                user_dictionary=self.user_dictionary,
+            )
+        return AdvancedTextProcessor(
+            language=lang_code,
+            enable_corrections=self._enable_post_processing,
+        )
+
+    def _backend_fingerprint(self) -> tuple:
+        """All parameters that flow into backend construction.
+
+        switch_backend() is a no-op while this fingerprint is unchanged;
+        changing ANY of these (not just backend/model) must rebuild.
+        """
+        return (
+            self.backend_name,
+            self.model_size,
+            self.device,
+            self.compute_type,
+            self.language,
+            self.vad_enabled,
+            self.vad_threshold,
+            self.min_silence_duration_ms,
+            self.min_speech_duration_ms,
+        )
 
     def _create_backend(self):
         """Create backend instance based on configuration."""
@@ -127,6 +147,7 @@ class Transcriber:
                 min_silence_duration_ms=self.min_silence_duration_ms,
                 min_speech_duration_ms=self.min_speech_duration_ms,
             )
+            self._created_fingerprint = self._backend_fingerprint()
 
         except Exception as e:
             if self.on_progress:
@@ -137,24 +158,43 @@ class Transcriber:
         self,
         backend: str,
         model_size: Optional[str] = None
-    ):
+    ) -> bool:
         """
         Switch to a different backend with rollback on failure.
 
-        Saves old state before switching. If new backend fails to load,
-        restores old backend, processor, and config. Old backend is only
-        unloaded after new one is confirmed working.
+        Non-blocking: if a transcription currently holds the engine lock,
+        returns False immediately ("busy") instead of freezing the caller
+        (settings handlers run on the GUI thread).
+
+        No-op fingerprint guard: re-applying identical settings does NOT
+        reload the model.
 
         Args:
             backend: New backend name (whisper, sherpa, podlodka-turbo)
             model_size: Optional new model size
+
+        Returns:
+            True — switched (or nothing to change), False — engine busy.
+        Raises on backend construction failure (state rolled back).
         """
-        with self._lock:
+        if not self._lock.acquire(blocking=False):
+            logger.warning("BACKEND_SWITCH_BUSY | transcription in progress, switch to %s rejected", backend)
+            return False
+        try:
             # Save old state for rollback
             old_backend_name = self.backend_name
             old_model_size = self.model_size
             old_backend_instance = self._backend
             old_processor = self.text_processor
+
+            # No-op guard: identical construction fingerprint + live backend
+            candidate_fp = (backend, model_size or old_model_size) + self._backend_fingerprint()[2:]
+            if (
+                self._backend is not None
+                and getattr(self, "_created_fingerprint", None) == candidate_fp
+            ):
+                logger.info("BACKEND_SWITCH_NOOP | %s/%s unchanged", backend, model_size or old_model_size)
+                return True
 
             cr = get_reporter()
             if cr:
@@ -168,20 +208,8 @@ class Transcriber:
                 if model_size:
                     self.model_size = model_size
 
-                # Recreate text processor for new backend
-                lang_code = self.language or "ru"
-                if backend == "sherpa" and ENHANCED_PROCESSOR_AVAILABLE:
-                    self.text_processor = EnhancedTextProcessor(
-                        language=lang_code,
-                        enable_corrections=self._enable_post_processing,
-                        enable_punctuation=True,
-                        user_dictionary=self.user_dictionary,
-                    )
-                else:
-                    self.text_processor = AdvancedTextProcessor(
-                        language=lang_code,
-                        enable_corrections=self._enable_post_processing
-                    )
+                # Recreate text processor for new backend/model
+                self.text_processor = self._make_text_processor()
 
                 # Create new backend (may raise)
                 self._create_backend()
@@ -202,6 +230,9 @@ class Transcriber:
                     old_backend_instance.unload_model()
                 except Exception as e:
                     logger.warning("UNLOAD_OLD_BACKEND_FAILED | error=%s", e)
+            return True
+        finally:
+            self._lock.release()
 
     def cancel(self):
         """Signal cancellation for long-running transcription."""
@@ -224,9 +255,6 @@ class Transcriber:
         """
         self._cancel_event.clear()
 
-        if self._backend is None:
-            self._create_backend()
-
         audio_duration = len(audio) / sample_rate
         cr = get_reporter()
         if cr:
@@ -237,24 +265,26 @@ class Transcriber:
         start_time = time.time()
 
         try:
-            # Transcribe using backend (pass cancel event for chunked processing)
-            text, backend_time = self._backend.transcribe(audio, sample_rate, cancel_event=self._cancel_event)
+            # Hold the engine lock for the whole inference: switch_backend()
+            # can never unload a model mid-decode (it try-acquires and
+            # returns busy instead of blocking the GUI thread).
+            with self._lock:
+                if self._backend is None:
+                    self._create_backend()
+                text, backend_time = self._backend.transcribe(audio, sample_rate, cancel_event=self._cancel_event)
 
-            # Track if Groq fell back to Sherpa
-            self.last_used_fallback = getattr(self._backend, 'last_used_fallback', False)
+                # Track if Groq fell back to Sherpa
+                self.last_used_fallback = getattr(self._backend, 'last_used_fallback', False)
 
-            # If Groq fell back to Sherpa, use EnhancedTextProcessor for proper
-            # punctuation restoration (Sherpa CTC output has no punctuation)
-            if self.last_used_fallback and self.backend_name == "groq" and ENHANCED_PROCESSOR_AVAILABLE:
-                if not isinstance(self.text_processor, EnhancedTextProcessor):
-                    lang_code = self.language or "ru"
-                    self.text_processor = EnhancedTextProcessor(
-                        language=lang_code,
-                        enable_corrections=self._enable_post_processing,
-                        enable_punctuation=True,
-                        user_dictionary=self.user_dictionary,
-                    )
-                    logger.info("GROQ_FALLBACK_PROCESSOR_SWITCH | switched to EnhancedTextProcessor")
+                # Groq's local fallback is Sherpa v3-punct: rebuild the processor
+                # so backend-aware config matches the text that was actually produced
+                if self.last_used_fallback and self.backend_name == "groq" and ENHANCED_PROCESSOR_AVAILABLE:
+                    if getattr(self.text_processor, "backend", None) != "sherpa":
+                        self.text_processor = self._make_text_processor(
+                            backend_name="sherpa",
+                            model_size="giga-am-v3-ru-punct",
+                        )
+                        logger.info("GROQ_FALLBACK_PROCESSOR_SWITCH | processor rebuilt for sherpa fallback")
 
             # Check cancellation after transcription
             if self._cancel_event.is_set():
@@ -266,10 +296,10 @@ class Transcriber:
                 text = self.text_processor.process(text)
 
             process_time = time.time() - start_time
-            logger.info("TRANSCRIBE_DONE | backend=%s | audio=%.1fs | elapsed=%.2fs (RTF=%.2f) | words=%d | \"%s\"",
+            logger.info("TRANSCRIBE_DONE | backend=%s | audio=%.1fs | elapsed=%.2fs (RTF=%.2f) | words=%d | chars=%d",
                          self.backend_name, audio_duration, process_time,
                          process_time / audio_duration if audio_duration > 0 else 0,
-                         len(text.split()), text[:50])
+                         len(text.split()), len(text))
             return text, process_time
 
         except Exception as e:
@@ -362,8 +392,9 @@ class Transcriber:
 
 
 def get_available_backends() -> list:
-    """Get list of available backends."""
-    return ["whisper", "sherpa"]
+    """Get list of registered backend names."""
+    from .backends import BACKENDS
+    return list(BACKENDS.keys())
 
 
 def get_backend_info(backend_name: str) -> dict:

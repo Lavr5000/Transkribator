@@ -1,27 +1,71 @@
 """CLI client for remote audio transcription with auto-detection of connection method."""
+import ipaddress
+import os
 import requests
 import sys
 import socket
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 from tqdm import tqdm
-from typing import Optional
+from typing import List, Optional
 
-# Try local first (VPN disabled), then remote (VPN enabled or no local access)
-SERVERS = [
-    "http://REDACTED-LAN:8000",  # Local network (VPN disabled)
-    "http://REDACTED-TUNNEL.serveo.net:8000"  # Through serveo.net
-]
+# Server list comes from the environment — no endpoints are hardcoded:
+#   set TRANSKRIBATOR_SERVERS=http://100.x.y.z:8000,http://192.168.1.10:8000
+# Plain HTTP exposes the API key and your audio to anything on the path, so
+# http:// is only accepted for loopback / RFC1918 LAN / Tailscale (100.64/10)
+# hosts. Anything else needs TRANSKRIBATOR_ALLOW_INSECURE=1 (not recommended).
+API_KEY = os.environ.get("TRANSCRIBER_API_KEY", "")
+
+
+def _host_is_private(host: str) -> bool:
+    """True when every resolved address of host is loopback/LAN/Tailscale."""
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        return False  # unresolvable — treat as insecure
+    addrs = {info[4][0] for info in infos}
+    if not addrs:
+        return False
+    for addr in addrs:
+        ip = ipaddress.ip_address(addr)
+        if not (ip.is_loopback or ip.is_private or ip in ipaddress.ip_network("100.64.0.0/10")):
+            return False
+    return True
+
+
+def get_servers() -> List[str]:
+    """Read and validate server URLs from TRANSKRIBATOR_SERVERS."""
+    raw = os.environ.get("TRANSKRIBATOR_SERVERS", "")
+    if not raw.strip():
+        print("✗ Не задан TRANSKRIBATOR_SERVERS.")
+        print("  Пример: set TRANSKRIBATOR_SERVERS=http://100.x.y.z:8000")
+        return []
+    allow_insecure = os.environ.get("TRANSKRIBATOR_ALLOW_INSECURE") == "1"
+    servers = []
+    for url in (u.strip().rstrip("/") for u in raw.split(",") if u.strip()):
+        parsed = urlparse(url)
+        if parsed.scheme == "http" and not allow_insecure and not _host_is_private(parsed.hostname or ""):
+            print(f"✗ Отклонён небезопасный адрес: {url}")
+            print("  http:// разрешён только для loopback/LAN/Tailscale-адресов.")
+            print("  Для остальных используйте https:// или TRANSKRIBATOR_ALLOW_INSECURE=1.")
+            continue
+        servers.append(url)
+    return servers
+
+
+def _headers() -> dict:
+    return {"X-API-Key": API_KEY} if API_KEY else {}
 
 
 def find_available_server() -> Optional[str]:
     """Find first available server."""
-    for server_url in SERVERS:
+    for server_url in get_servers():
         try:
             response = requests.get(f"{server_url}/health", timeout=3)
             if response.status_code == 200:
                 return server_url
-        except:
+        except requests.exceptions.RequestException:
             continue
     return None
 
@@ -44,17 +88,11 @@ def transcribe_file(file_path: Path) -> str:
         print("✗ Сервер недоступен!")
         print("\nПроверьте что:")
         print("  1. Удаленный ПК включён")
-        print("  2. Сервер запущен (AUTOSTART_FINAL.bat)")
-        print("  3. VPN выключен или включен (оба режима работают)")
+        print("  2. Сервер запущен (python server.py)")
+        print("  3. TRANSKRIBATOR_SERVERS указывает на правильный адрес")
         return ""
 
-    # Determine connection type
-    if server_url == SERVERS[0]:
-        connection_type = "🏠 Локальная сеть (VPN выключен)"
-    else:
-        connection_type = "🌐 Через интернет (serveo.net)"
-
-    print(f"✓ Сервер найден: {connection_type}")
+    print(f"✓ Сервер найден: {server_url}")
 
     # Step 1: Upload file
     print(f"\n[1/3] Загрузка файла: {file_path.name}")
@@ -65,6 +103,7 @@ def transcribe_file(file_path: Path) -> str:
             response = requests.post(
                 f"{server_url}/transcribe",
                 files={"file": f},
+                headers=_headers(),
                 timeout=60
             )
     except requests.exceptions.RequestException as e:
@@ -89,7 +128,7 @@ def transcribe_file(file_path: Path) -> str:
     with tqdm(desc="Прогресс", unit="сек") as pbar:
         while True:
             try:
-                status_response = requests.get(f"{server_url}/status/{task_id}", timeout=10)
+                status_response = requests.get(f"{server_url}/status/{task_id}", headers=_headers(), timeout=10)
                 status = status_response.json()
             except requests.exceptions.RequestException as e:
                 pbar.close()
@@ -114,7 +153,7 @@ def transcribe_file(file_path: Path) -> str:
     print(f"\n[3/3] Получение результата...")
 
     try:
-        result_response = requests.get(f"{server_url}/result/{task_id}", timeout=30)
+        result_response = requests.get(f"{server_url}/result/{task_id}", headers=_headers(), timeout=30)
         if result_response.status_code != 200:
             print(f"      ✗ Ошибка загрузки результата: {result_response.status_code}")
             return ""
@@ -159,14 +198,7 @@ def check_server_health() -> bool:
         response = requests.get(f"{server_url}/health", timeout=5)
         if response.status_code == 200:
             data = response.json()
-
-            # Determine connection type
-            if server_url == SERVERS[0]:
-                connection = "🏠 Локальная сеть"
-            else:
-                connection = "🌐 Через интернет (serveo.net)"
-
-            print(f"✓ Сервер доступен: {connection}")
+            print(f"✓ Сервер доступен: {server_url}")
             print(f"  Статус: {data['status']}")
             print(f"  Модель: {data.get('model', 'base')}")
             return True

@@ -61,13 +61,19 @@ class BaseBackend(ABC):
         """
         Transcribe audio to text.
 
+        CONTRACT: returns RAW model output. Backends must NOT run text
+        post-processing (corrections/punctuation/morphology) — that is the
+        Transcriber's single responsibility. Running it here too caused the
+        historical double-processing bug (each text processed twice by two
+        different rule sets).
+
         Args:
             audio: Audio data as numpy array (float32, normalized to [-1, 1])
             sample_rate: Sample rate in Hz (default: 16000)
             cancel_event: Optional threading.Event to signal cancellation
 
         Returns:
-            Tuple of (transcribed_text, processing_time_seconds)
+            Tuple of (raw_transcribed_text, processing_time_seconds)
 
         Raises:
             Exception: If transcription fails

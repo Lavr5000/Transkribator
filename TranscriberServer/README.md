@@ -1,81 +1,28 @@
-# Remote Transcriber Server
+# TranscriberServer
 
-FastAPI сервер для удаленной транскрибации аудиофайлов через WhisperTyping.
+Optional remote transcription server for Transkribator. The desktop app works fully offline on its own; this server is only useful if you want to offload transcription to another (faster) machine on your network.
 
-## Установка
-
-### 1. Установить зависимости
+## Run
 
 ```bash
-cd C:\Users\user\.claude\REDACTED-PATH\Transkribator\TranscriberServer
 pip install -r requirements.txt
+set TRANSCRIBER_API_KEY=<generate-a-long-random-key>
+python server.py
 ```
 
-### 2. Протестировать локально
+The server binds to `127.0.0.1:8000` by default. All endpoints except `/health` require the `X-API-Key` header.
+
+## Client configuration
+
+On the client machine set:
 
 ```bash
-python -m uvicorn server:app --host 127.0.0.1 --port 8000 --reload
+set TRANSKRIBATOR_SERVERS=http://<server-host>:8000
+set TRANSCRIBER_API_KEY=<same-key>
 ```
 
-Проверить: http://127.0.0.1:8000/docs
+## Security notes
 
-## Использование
-
-### Запуск сервера
-
-```bash
-python -m uvicorn server:app --host 127.0.0.1 --port 8000
-```
-
-### API Endpoints
-
-- `POST /transcribe` - Загрузить аудиофайл для транскрибации
-- `GET /status/{task_id}` - Проверить статус
-- `GET /result/{task_id}` - Скачать результат
-- `GET /health` - Проверка состояния
-
-### Пример запроса
-
-```bash
-curl -X POST "http://127.0.0.1:8000/transcribe" \
-  -H "Content-Type: multipart/form-data" \
-  -F "file=@audio.mp3"
-```
-
-Ответ:
-```json
-{
-  "task_id": "abc-123-def",
-  "status": "processing",
-  "filename": "audio.mp3"
-}
-```
-
-## Интеграция с автозапуском
-
-Добавить в `C:\Users\User1\Desktop\AUTOSTART_SERVEO.bat`:
-
-```batch
-cd C:\Users\user\.claude\REDACTED-PATH\Transkribator\TranscriberServer
-start /B python -m uvicorn server:app --host 127.0.0.1 --port 8000
-```
-
-## Структура
-
-```
-TranscriberServer/
-├── server.py              # FastAPI сервер
-├── transcriber_wrapper.py # Обёртка над Transcriber
-├── requirements.txt       # Зависимости
-├── uploads/               # Входящие файлы
-└── results/               # Результаты транскрибации
-```
-
-## Логирование
-
-Логи сохраняются в консоль. Для записи в файл добавьте в `server.py`:
-
-```python
-import logging
-logging.basicConfig(filename='server.log', level=logging.INFO)
-```
+- Traffic is plain HTTP: the API key and your audio are visible to anything on the path. Only expose the server over a trusted network — a Tailscale/WireGuard address is the recommended way to reach it remotely.
+- Do NOT publish the port through public tunnel relays (serveo, ngrok and similar): the relay operator sees your key and audio, and binding to `127.0.0.1` gives no protection once a tunnel forwards the port.
+- `uploads/` and `results/` may contain recorded speech and transcripts; they are gitignored — keep it that way.

@@ -49,10 +49,12 @@ class CrashReporter:
         _instance = self
         os.makedirs(self.crash_dir, exist_ok=True)
 
-        # faulthandler for C-level crashes (SIGSEGV, SIGABRT)
+        # faulthandler for C-level crashes (SIGSEGV, SIGABRT).
+        # Append mode: a watchdog restart must not erase the log of the very
+        # segfault it is restarting from.
         try:
             self._fault_file = open(
-                os.path.join(self.crash_dir, "faulthandler.log"), "w"
+                os.path.join(self.crash_dir, "faulthandler.log"), "a"
             )
             faulthandler.enable(file=self._fault_file, all_threads=True)
         except Exception:
@@ -111,21 +113,36 @@ class CrashReporter:
 
         return report
 
+    MAX_REPORTS = 20  # keep only the newest N crash reports
+
     def _save_report(self, report):
-        """Write crash report JSON to crash_dir."""
+        """Write crash report JSON to crash_dir (crash_ prefix — watchdog filters on it)."""
         os.makedirs(self.crash_dir, exist_ok=True)
-        filename = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + ".json"
+        filename = "crash_" + datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + ".json"
         filepath = os.path.join(self.crash_dir, filename)
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(report, f, ensure_ascii=False, indent=2)
+        try:
+            reports = sorted(
+                f for f in os.listdir(self.crash_dir)
+                if f.startswith("crash_") and f.endswith(".json")
+            )
+            for old in reports[:-self.MAX_REPORTS]:
+                os.unlink(os.path.join(self.crash_dir, old))
+        except Exception:
+            pass
 
     def _notify_telegram(self, report):
-        """Send crash report to Telegram Saved Messages (best-effort)."""
+        """Queue crash report for Telegram (disk only — NO network in excepthook).
+
+        A hung network call here would block crash-exit and the watchdog
+        restart. The queued message is sent on next app start (send_unsent).
+        """
         try:
-            from notifier import TelegramNotifier
+            from .notifier import TelegramNotifier
             notifier = TelegramNotifier(crash_dir=self.crash_dir)
             message = notifier.format_crash_report(report)
-            notifier.send(message)
+            notifier.queue_for_next_start(message)
         except Exception:
             pass  # notification must never crash the app
 

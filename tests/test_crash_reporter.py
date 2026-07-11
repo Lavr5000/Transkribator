@@ -7,9 +7,9 @@ import tempfile
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from crash_reporter import CrashReporter
+from src.crash_reporter import CrashReporter
 
 
 @pytest.fixture

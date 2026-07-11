@@ -3,10 +3,10 @@ import pytest
 import sys
 from pathlib import Path
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from text_processor_enhanced import EnhancedTextProcessor
+from src.text_processor_enhanced import EnhancedTextProcessor
 
 
 class TestCapitalization:
@@ -18,7 +18,10 @@ class TestCapitalization:
         return EnhancedTextProcessor(
             language="ru",
             enable_corrections=True,
-            enable_punctuation=False,  # Disable ML punctuation for tests
+            # ML punctuation is disabled via the app's real default model:
+            # *-punct models emit punctuation, processor skips restoration
+            # (the ctor enable_punctuation flag is overridden by backend config)
+            model_size="giga-am-v3-ru-punct",
             enable_phonetics=False,
             enable_morphology=False,
             enable_proper_nouns=True  # Enable proper nouns

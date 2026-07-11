@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
 @pytest.fixture
@@ -23,8 +23,11 @@ def notifier(crash_dir):
     with patch.dict(os.environ, {
         "TELEGRAM_API_ID": "12345",
         "TELEGRAM_API_HASH": "testhash",
+        # Full credentials required: without a session path the notifier
+        # intentionally refuses to queue (unbounded-file fix)
+        "TELEGRAM_SESSION_PATH": str(crash_dir / "session"),
     }):
-        from notifier import TelegramNotifier
+        from src.notifier import TelegramNotifier
         return TelegramNotifier(crash_dir=str(crash_dir))
 
 

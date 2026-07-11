@@ -23,8 +23,9 @@ class Config:
     backend: str = "sherpa"  # whisper, sherpa (sherpa is ~30% faster for Russian)
 
     # Model settings
-    model_size: str = "giga-am-v3-ru-punct"  # For Sherpa: giga-am-v3-ru-punct (default, with punctuation),
-                                              # giga-am-v3-ru, giga-am-v2-ru, giga-am-ru
+    model_size: str = "giga-am-v3-ru"         # For Sherpa: giga-am-v3-ru (default, shipped in repo + spec),
+                                              # giga-am-v3-ru-punct (with punctuation, downloaded on demand),
+                                              # giga-am-v2-ru, giga-am-ru
                                               # For Whisper: tiny, base, small, medium, large
                                               # For Podlodka: podlodka-turbo
     language: str = "ru"  # auto-detect or specific language code
@@ -91,6 +92,13 @@ class Config:
     total_recordings: int = 0
     total_seconds_saved: float = 0.0
 
+    def __post_init__(self) -> None:
+        # Non-field state guarding rate-limited disk writes.
+        # Initialized once at construction, before any thread can call save().
+        self._save_lock = threading.Lock()
+        self._last_save_time = 0.0
+        self._deferred_pending = False
+
     @classmethod
     def get_config_dir(cls) -> Path:
         """Get the configuration directory."""
@@ -118,22 +126,25 @@ class Config:
 
     def save(self) -> None:
         """Save configuration to file (rate-limited to avoid excessive disk I/O)."""
-        now = time.time()
-        if hasattr(self, '_last_save_time') and now - self._last_save_time < 0.5:
-            if not getattr(self, '_deferred_pending', False):
-                self._deferred_pending = True
-                threading.Timer(1.0, self._deferred_flush).start()
-            return
-        self._write_to_disk()
+        with self._save_lock:
+            now = time.time()
+            if self._last_save_time and now - self._last_save_time < 0.5:
+                if not self._deferred_pending:
+                    self._deferred_pending = True
+                    threading.Timer(1.0, self._deferred_flush).start()
+                return
+            self._last_save_time = now
+            self._write_locked()
 
     def _deferred_flush(self):
         """Flush deferred save to disk."""
-        self._deferred_pending = False
-        self._write_to_disk()
+        with self._save_lock:
+            self._deferred_pending = False
+            self._last_save_time = time.time()
+            self._write_locked()
 
-    def _write_to_disk(self):
-        """Write config to disk immediately."""
-        self._last_save_time = time.time()
+    def _write_locked(self):
+        """Write config to disk. Caller MUST hold self._save_lock."""
         config_path = self.get_config_path()
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(asdict(self), f, indent=2)

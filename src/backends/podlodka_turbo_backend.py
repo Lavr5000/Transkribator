@@ -18,14 +18,6 @@ try:
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
 
-# Import enhanced text processor
-try:
-    from src.text_processor_enhanced import EnhancedTextProcessor
-    ENHANCED_PROCESSOR_AVAILABLE = True
-except ImportError:
-    from src.text_processor import AdvancedTextProcessor
-    ENHANCED_PROCESSOR_AVAILABLE = False
-
 try:
     import scipy.signal
     SCIPY_AVAILABLE = True
@@ -57,8 +49,12 @@ class PodlodkaTurboBackend(BaseBackend):
         super().__init__(model_size, device, compute_type, language, on_progress)
         self._model = None
         self._processor = None
-        self._loading = False
         self._lock = threading.Lock()
+        # Load coordination (see sherpa_backend for the pattern rationale)
+        self._load_done = threading.Event()
+        self._load_done.set()
+        self._load_error = None
+        self._load_generation = 0
         self._detected_device = device
         self._dtype = "float32"
 
@@ -72,14 +68,8 @@ class PodlodkaTurboBackend(BaseBackend):
         self._min_silence_duration_ms = min_silence_duration_ms
         self._min_speech_duration_ms = min_speech_duration_ms
 
-        # Initialize text processor with backend-aware configuration
-        if ENHANCED_PROCESSOR_AVAILABLE:
-            self.text_processor = EnhancedTextProcessor(
-                language=self.language,
-                backend=self.backend_name
-            )
-        else:
-            self.text_processor = AdvancedTextProcessor(language=self.language)
+        # Post-processing is Transcriber's job (single point) — backends
+        # return RAW model output. See base.BaseBackend.transcribe contract.
 
     def _detect_device(self) -> Tuple[str, str]:
         """Detect the best device and dtype."""
@@ -122,14 +112,11 @@ class PodlodkaTurboBackend(BaseBackend):
                 self.on_progress("Error: transformers not installed")
             raise RuntimeError("transformers not installed. Install: pip install transformers torch")
 
+        if self._wait_if_loading_elsewhere():
+            return
+
         with self._lock:
-            if self._model is not None:
-                return
-
-            if self._loading:
-                return
-
-            self._loading = True
+            my_generation = self._load_generation
 
         try:
             if self.on_progress:
@@ -143,7 +130,7 @@ class PodlodkaTurboBackend(BaseBackend):
 
             # Load model
             torch_dtype = getattr(torch, dtype)
-            self._model = AutoModelForSpeechSeq2Seq.from_pretrained(
+            model = AutoModelForSpeechSeq2Seq.from_pretrained(
                 model_id,
                 torch_dtype=torch_dtype,
                 low_cpu_mem_usage=True,
@@ -151,10 +138,10 @@ class PodlodkaTurboBackend(BaseBackend):
             ).to(device)
 
             # Load processor
-            self._processor = AutoProcessor.from_pretrained(model_id)
+            processor = AutoProcessor.from_pretrained(model_id)
 
             # Initialize Silero VAD if enabled
-            self._vad = None
+            vad = None
             if self._vad_enabled:
                 try:
                     vad_dir = self._get_vad_model_dir()
@@ -179,27 +166,57 @@ class PodlodkaTurboBackend(BaseBackend):
                             sample_rate=16000,
                             num_threads=1,
                         )
-                        self._vad = sherpa_onnx.VadModel.create(vad_config)
+                        vad = sherpa_onnx.VadModel.create(vad_config)
                         logger.debug("PODLODKA_VAD_INIT | model=%s", vad_model_path.name)
                 except Exception as e:
                     logger.warning("PODLODKA_VAD_INIT_FAILED | %s", e)
-                    self._vad = None
+                    vad = None
+
+            with self._lock:
+                if self._load_generation == my_generation:
+                    self._model = model
+                    self._processor = processor
+                    self._vad = vad
+                else:
+                    logger.info("LOAD_STALE_DISCARDED | generation %d != %d",
+                                my_generation, self._load_generation)
 
             if self.on_progress:
                 self.on_progress(f"Whisper-Podlodka-Turbo loaded ({device})")
 
         except Exception as e:
+            self._load_error = e
             if self.on_progress:
                 self.on_progress(f"Error loading Podlodka-Turbo: {e}")
             raise
         finally:
-            self._loading = False
+            self._load_done.set()
+
+    def _wait_if_loading_elsewhere(self) -> bool:
+        """See sherpa_backend._wait_if_loading_elsewhere — same coordination."""
+        while True:
+            with self._lock:
+                if self._model is not None:
+                    return True
+                if self._load_done.is_set():
+                    self._load_done.clear()
+                    self._load_error = None
+                    return False
+            if not self._load_done.wait(timeout=600):
+                raise TimeoutError("Model load by another thread timed out")
+            with self._lock:
+                if self._model is not None:
+                    return True
+                if self._load_error is not None:
+                    raise RuntimeError(f"Model load failed in another thread: {self._load_error}")
 
     def unload_model(self):
         """Unload the model to free memory."""
         with self._lock:
+            self._load_generation += 1  # invalidate any in-flight load
             self._model = None
             self._processor = None
+            self._vad = None
             gc.collect()
             try:
                 if torch.cuda.is_available():
@@ -228,6 +245,9 @@ class PodlodkaTurboBackend(BaseBackend):
         """
         if self._model is None:
             self.load_model()
+
+        if cancel_event is not None and cancel_event.is_set():
+            return "", 0.0
 
         start_time = time.time()
 
@@ -305,9 +325,6 @@ class PodlodkaTurboBackend(BaseBackend):
             # Clean up text
             text = text.strip()
 
-            # Apply text post-processing (backend-aware)
-            if hasattr(self, 'text_processor') and self.text_processor:
-                text = self.text_processor.process(text)
 
             process_time = time.time() - start_time
 
