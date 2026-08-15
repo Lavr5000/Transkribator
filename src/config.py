@@ -92,6 +92,17 @@ class Config:
     total_recordings: int = 0
     total_seconds_saved: float = 0.0
 
+    # v3 modernization — Stage 0 flags (see План модернизации v3, Этап 0)
+    research_mode: bool = False       # experiments only: hard-disables paste/clipboard
+    audio_archive: bool = False       # opt-in raw-audio retention corpus
+    audio_archive_dpapi: bool = True  # DPAPI encryption for the archive (opt-out checkbox)
+    legacy_prompt_removed: bool = True  # off = restore the leaked "Диктовка..." prompt (Groq)
+
+    # v3 modernization — Stage 1 flag (see План модернизации v3, Этап 1 / D3)
+    # off = MME @ 16 kHz (v2 behaviour); on = WASAPI @ 48 kHz + FIR resample to
+    # 16 kHz at stop(), with automatic visible MME fallback if the open fails.
+    capture_wasapi: bool = False
+
     def __post_init__(self) -> None:
         # Non-field state guarding rate-limited disk writes.
         # Initialized once at construction, before any thread can call save().

@@ -45,6 +45,7 @@ class PodlodkaTurboBackend(BaseBackend):
         vad_threshold: float = 0.5,
         min_silence_duration_ms: int = 800,
         min_speech_duration_ms: int = 500,
+        legacy_prompt_removed: bool = True,  # Groq-only flag, accepted for interface parity
     ):
         super().__init__(model_size, device, compute_type, language, on_progress)
         self._model = None

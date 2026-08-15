@@ -46,6 +46,8 @@ class Transcriber:
         min_speech_duration_ms: int = 500,
         # User dictionary
         user_dictionary: list = None,
+        # Этап 0: legacy Groq prompt removal (default on, see groq_backend.py)
+        legacy_prompt_removed: bool = True,
     ):
         """
         Initialize transcriber with specified backend.
@@ -79,6 +81,7 @@ class Transcriber:
 
         # User dictionary for custom corrections
         self.user_dictionary = user_dictionary or []
+        self.legacy_prompt_removed = legacy_prompt_removed
 
         # Fallback tracking
         self.last_used_fallback = False
@@ -129,6 +132,7 @@ class Transcriber:
             self.vad_threshold,
             self.min_silence_duration_ms,
             self.min_speech_duration_ms,
+            self.legacy_prompt_removed,
         )
 
     def _create_backend(self):
@@ -146,6 +150,7 @@ class Transcriber:
                 vad_threshold=self.vad_threshold,
                 min_silence_duration_ms=self.min_silence_duration_ms,
                 min_speech_duration_ms=self.min_speech_duration_ms,
+                legacy_prompt_removed=self.legacy_prompt_removed,
             )
             self._created_fingerprint = self._backend_fingerprint()
 
@@ -275,6 +280,8 @@ class Transcriber:
 
                 # Track if Groq fell back to Sherpa
                 self.last_used_fallback = getattr(self._backend, 'last_used_fallback', False)
+                self.last_fallback_reason = getattr(self._backend, 'last_fallback_reason', None)
+                self.last_prompt_sent = getattr(self._backend, 'last_prompt_sent', None)
 
                 # Groq's local fallback is Sherpa v3-punct: rebuild the processor
                 # so backend-aware config matches the text that was actually produced

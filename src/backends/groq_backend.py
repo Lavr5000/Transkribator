@@ -9,6 +9,7 @@ from typing import Callable, Optional, Tuple
 import numpy as np
 
 from .base import BaseBackend
+from ..event_log import log_event
 
 logger = logging.getLogger("transkribator")
 
@@ -61,11 +62,17 @@ class GroqBackend(BaseBackend):
         vad_threshold: float = 0.5,
         min_silence_duration_ms: int = 800,
         min_speech_duration_ms: int = 500,
+        # Этап 0: legacy prompt was a proven leak source with zero measured
+        # benefit (R6) — default removes it; off restores it for rollback.
+        legacy_prompt_removed: bool = True,
     ):
         super().__init__(model_size, device, compute_type, language, on_progress)
         self._client = None
         self._fallback = None
         self.last_used_fallback = False  # True if last transcription used Sherpa fallback
+        self.last_fallback_reason: Optional[str] = None
+        self.last_prompt_sent: Optional[str] = None  # captured at request time, for prompt_version
+        self.legacy_prompt_removed = legacy_prompt_removed
 
     def _get_fallback(self):
         """Lazy-init SherpaBackend for fallback."""
@@ -133,12 +140,19 @@ class GroqBackend(BaseBackend):
     def transcribe(self, audio: np.ndarray, sample_rate: int = 16000, cancel_event=None) -> Tuple[str, float]:
         start_time = time.time()
         self.last_used_fallback = False
+        self.last_fallback_reason = None
+        # Legacy prompt is a proven leak source with zero measured benefit
+        # (R6) — removed by default (Этап 0). Off restores it for rollback;
+        # no glossary exists yet (Этап 3), so the only alternative is none.
+        self.last_prompt_sent = None if self.legacy_prompt_removed else "Диктовка на русском языке."
 
         if cancel_event and cancel_event.is_set():
+            self.last_fallback_reason = "cancelled"
             return "", 0.0
 
         if self._client is not None and _groq_in_cooldown():
             logger.info("GROQ_COOLDOWN | recent failure, using Sherpa fallback without network attempt")
+            self.last_fallback_reason = "cooldown"
         elif self._client is not None:
             try:
                 wav_bytes = self._numpy_to_wav_bytes(audio, sample_rate)
@@ -150,7 +164,7 @@ class GroqBackend(BaseBackend):
                     model=self.model_size,
                     language=self.language if self.language != "auto" else None,
                     temperature=0.0,  # deterministic decoding reduces Russian hallucinations
-                    prompt="Диктовка на русском языке.",  # hints Groq to expect RU dictation
+                    prompt=self.last_prompt_sent,
                     timeout=GROQ_API_TIMEOUT,
                 )
                 text = resp.text.strip()
@@ -160,6 +174,7 @@ class GroqBackend(BaseBackend):
                 return text, elapsed
             except Exception as e:
                 _mark_groq_failure()
+                self.last_fallback_reason = type(e).__name__
                 logger.warning("GROQ_FALLBACK | reason=%s | falling back to sherpa (cooldown %ds)",
                                e, GROQ_FAILURE_COOLDOWN)
                 if self.on_progress:
@@ -167,6 +182,7 @@ class GroqBackend(BaseBackend):
 
         # Fallback
         self.last_used_fallback = True
+        log_event("fallback", backend="groq", reason=self.last_fallback_reason)
         fallback = self._get_fallback()
         if not fallback.is_model_loaded():
             fallback.load_model()
