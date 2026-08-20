@@ -23,7 +23,7 @@ class Config:
     backend: str = "sherpa"  # whisper, sherpa (sherpa is ~30% faster for Russian)
 
     # Model settings
-    model_size: str = "giga-am-v3-ru"         # For Sherpa: giga-am-v3-ru (default, shipped in repo + spec),
+    model_size: str = "giga-am-v3-ru-punct"    # For Sherpa: giga-am-v3-ru (default, shipped in repo + spec),
                                               # giga-am-v3-ru-punct (with punctuation, downloaded on demand),
                                               # giga-am-v2-ru, giga-am-ru
                                               # For Whisper: tiny, base, small, medium, large
@@ -279,7 +279,7 @@ PASTE_METHODS = {
 QUALITY_PROFILES = {
     "fast": {
         "backend": "sherpa",
-        "model_size": "giga-am-v3-ru",
+        "model_size": "giga-am-v3-ru-punct",
         "vad_enabled": False,
         "vad_threshold": 0.5,
         "min_silence_duration_ms": 800,
@@ -288,7 +288,7 @@ QUALITY_PROFILES = {
     },
     "balanced": {
         "backend": "sherpa",
-        "model_size": "giga-am-v3-ru",
+        "model_size": "giga-am-v3-ru-punct",
         "vad_enabled": True,
         "vad_threshold": 0.5,
         "min_silence_duration_ms": 800,
@@ -297,7 +297,7 @@ QUALITY_PROFILES = {
     },
     "quality": {
         "backend": "sherpa",
-        "model_size": "giga-am-v3-ru",
+        "model_size": "giga-am-v3-ru-punct",
         "vad_enabled": True,
         "vad_threshold": 0.3,
         "min_silence_duration_ms": 500,

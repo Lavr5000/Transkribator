@@ -442,28 +442,38 @@ class SherpaBackend(BaseBackend):
             # Apply VAD to filter silence if enabled
             if self._vad_enabled and self._vad is not None:
                 window_size = self._vad.window_size()
-                speech_windows = []
-                has_speech = False
-                for i in range(0, len(audio), window_size):
+                starts = list(range(0, len(audio), window_size))
+                flags = []
+                for i in starts:
                     window = audio[i:i + window_size]
                     if len(window) < window_size:
                         # Pad last window for VAD check
                         padded = np.zeros(window_size, dtype=np.float32)
                         padded[:len(window)] = window
-                        is_speech = self._vad.is_speech(padded.tolist())
+                        flags.append(self._vad.is_speech(padded.tolist()))
                     else:
-                        is_speech = self._vad.is_speech(window.tolist())
-                    if is_speech:
-                        has_speech = True
-                        speech_windows.append(audio[i:min(i + window_size, len(audio))])
+                        flags.append(self._vad.is_speech(window.tolist()))
+                has_speech = any(flags)
 
-                if has_speech and speech_windows:
-                    audio = np.concatenate(speech_windows)
-                    logger.debug("VAD_FILTER | kept %d/%d windows", len(speech_windows),
-                                 len(audio) // window_size + 1)
-                elif not has_speech:
-                    logger.debug("VAD_NO_SPEECH | audio=%.1fs", len(audio) / 16000.0)
-                    return "", 0.0
+                if has_speech:
+                    # ponytail: trim leading/trailing silence only, with 0.3s of
+                    # padding. Splicing out every non-speech window inside the
+                    # phrase clipped whole words (VAD is per-32ms and has no
+                    # hangover), which is exactly the "lost first word" bug.
+                    pad = int(0.3 * 16000)
+                    first = starts[flags.index(True)]
+                    last = starts[len(flags) - 1 - flags[::-1].index(True)] + window_size
+                    lo = max(0, first - pad)
+                    hi = min(len(audio), last + pad)
+                    logger.debug("VAD_TRIM | %.2fs -> %.2fs", len(audio) / 16000.0,
+                                 (hi - lo) / 16000.0)
+                    audio = audio[lo:hi]
+                else:
+                    # ponytail: fail-open — VAD misses quiet/short speech, and an
+                    # empty result surfaces to the user as "Ошибка транскрибации".
+                    # Transcribe the raw audio instead of throwing it away.
+                    logger.warning("VAD_NO_SPEECH_FALLTHROUGH | audio=%.1fs | transcribing unfiltered",
+                                   len(audio) / 16000.0)
                 self._vad.reset()
 
             # Route: chunk long audio to avoid ONNX crash

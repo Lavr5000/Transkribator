@@ -1,5 +1,6 @@
 """Enhanced text post-processing with punctuation restoration for Sherpa-ONNX."""
 import logging
+import os
 import re
 from typing import Dict, List, Tuple, Optional
 
@@ -599,7 +600,20 @@ class EnhancedTextProcessor(TextProcessor):
         if self.punctuation_model is None:
             try:
                 logger.info("PUNCTUATION_MODEL_LOADING")
-                self.punctuation_model = PunctuationModel()
+                # ponytail: offline-only load. On a slow link HuggingFace download
+                # hangs for minutes inside the hot path and the transcription
+                # times out. Cache hit = fast, cache miss = instant failure below.
+                prev = {k: os.environ.get(k) for k in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE")}
+                os.environ["HF_HUB_OFFLINE"] = "1"
+                os.environ["TRANSFORMERS_OFFLINE"] = "1"
+                try:
+                    self.punctuation_model = PunctuationModel()
+                finally:
+                    for k, v in prev.items():
+                        if v is None:
+                            os.environ.pop(k, None)
+                        else:
+                            os.environ[k] = v
                 logger.info("PUNCTUATION_MODEL_LOADED")
             except Exception as e:
                 logger.warning("PUNCTUATION_MODEL_LOAD_FAILED | %s", e)
