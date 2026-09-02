@@ -1213,7 +1213,7 @@ class MainWindow(QMainWindow):
                 self._settings.model_combo.blockSignals(True)
                 self._settings._update_model_options()
                 self._settings.model_combo.blockSignals(False)
-                default = {"whisper": "base", "sherpa": "giga-am-v3-ru", "podlodka-turbo": "podlodka-turbo", "groq": "whisper-large-v3-turbo"}.get(bid, "base")
+                default = {"whisper": "base", "sherpa": "giga-am-v3-ru-punct", "podlodka-turbo": "podlodka-turbo", "groq": "whisper-large-v3-turbo"}.get(bid, "base")
                 self.config.model_size = default
                 self.config.save()
                 if not self.transcriber.switch_backend(bid, default):

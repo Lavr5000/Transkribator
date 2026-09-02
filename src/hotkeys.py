@@ -255,12 +255,21 @@ def paste_from_clipboard(use_terminal_shortcut: bool = True) -> bool:
 
     if HOTKEY_BACKEND == "keyboard":
         try:
-            if use_terminal_shortcut:
-                # Terminal paste: Ctrl+Shift+V
-                keyboard.press_and_release('ctrl+shift+v')
-            else:
-                # Standard paste: Ctrl+V
-                keyboard.press_and_release('ctrl+v')
+            # ponytail: press/release the modifiers explicitly with a small
+            # settle delay. press_and_release('ctrl+shift+v') races on Windows —
+            # the modifiers occasionally register after the 'v', so the target
+            # window receives a literal "v" in front of the pasted text.
+            mods = ['ctrl', 'shift'] if use_terminal_shortcut else ['ctrl']
+            try:
+                for m in mods:
+                    keyboard.press(m)
+                time.sleep(0.03)
+                keyboard.press('v')
+                time.sleep(0.03)
+                keyboard.release('v')
+            finally:
+                for m in reversed(mods):
+                    keyboard.release(m)
             return True
         except Exception as e:
             print(f"Failed to simulate paste: {e}")

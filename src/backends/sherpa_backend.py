@@ -456,17 +456,20 @@ class SherpaBackend(BaseBackend):
                 has_speech = any(flags)
 
                 if has_speech:
-                    # ponytail: trim leading/trailing silence only, with 0.3s of
-                    # padding. Splicing out every non-speech window inside the
-                    # phrase clipped whole words (VAD is per-32ms and has no
-                    # hangover), which is exactly the "lost first word" bug.
-                    pad = int(0.3 * 16000)
+                    # ponytail: trim the TAIL only. Head trimming kept eating the
+                    # first words: WebRTC AGC ramps up over the first ~1s, so the
+                    # opening word is quiet, VAD scores it as silence and no pad
+                    # size reliably saves it ("Направляю финмодель" vanished twice).
+                    # Leading silence costs ~0.04 RTF-seconds to transcribe and
+                    # GigaAM CTC does not hallucinate on it — cheap insurance.
+                    pad_tail = int(0.3 * 16000)
                     first = starts[flags.index(True)]
                     last = starts[len(flags) - 1 - flags[::-1].index(True)] + window_size
-                    lo = max(0, first - pad)
-                    hi = min(len(audio), last + pad)
-                    logger.debug("VAD_TRIM | %.2fs -> %.2fs", len(audio) / 16000.0,
-                                 (hi - lo) / 16000.0)
+                    lo = 0
+                    hi = min(len(audio), last + pad_tail)
+                    logger.debug("VAD_TRIM | %.2fs -> %.2fs | first_speech=%.2fs",
+                                 len(audio) / 16000.0, (hi - lo) / 16000.0,
+                                 first / 16000.0)
                     audio = audio[lo:hi]
                 else:
                     # ponytail: fail-open — VAD misses quiet/short speech, and an

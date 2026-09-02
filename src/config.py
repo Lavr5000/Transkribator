@@ -23,9 +23,10 @@ class Config:
     backend: str = "sherpa"  # whisper, sherpa (sherpa is ~30% faster for Russian)
 
     # Model settings
-    model_size: str = "giga-am-v3-ru-punct"    # For Sherpa: giga-am-v3-ru (default, shipped in repo + spec),
-                                              # giga-am-v3-ru-punct (with punctuation, downloaded on demand),
-                                              # giga-am-v2-ru, giga-am-ru
+    model_size: str = "giga-am-v3-ru-punct"   # For Sherpa: giga-am-v3-ru-punct (default, shipped in repo;
+                                              # ASR emits punctuation itself, so the 560M XLM-R restorer
+                                              # never loads — no network needed at runtime),
+                                              # giga-am-v3-ru, giga-am-v2-ru, giga-am-ru
                                               # For Whisper: tiny, base, small, medium, large
                                               # For Podlodka: podlodka-turbo
     language: str = "ru"  # auto-detect or specific language code
