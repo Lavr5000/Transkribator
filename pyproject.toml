@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "whisper-typing"
-version = "2.3.0"
+version = "2.4.0"
 description = "Local voice-to-text transcription app powered by Sherpa-ONNX and GigaAM v3"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.9"
 authors = [
-    {name = "WhisperTyping", email = "contact@whispertyping.local"}
+    {name = "Denis Lavrov (Lavr5000)"}
 ]
 keywords = ["transcription", "voice", "speech-to-text", "stt", "russian", "offline"]
 classifiers = [

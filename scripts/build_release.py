@@ -56,7 +56,7 @@ FORBIDDEN_SUFFIXES = {".log", ".jsonl", ".wav", ".mp3", ".ogg", ".oga", ".m4a",
 FORBIDDEN_NAMES = {"config.json", "history.json", "events.jsonl", ".env",
                    "debug.log", "faulthandler.log"}
 # Key prefixes and the owner's home path. Checked inside text-ish files only.
-FORBIDDEN_STRINGS = [r"C:\\Users\\user", "sk-", "gsk_", "hf_", "AIza"]
+FORBIDDEN_STRINGS = [r"C:[\\/]+Users[\\/]+user", "sk-", "gsk_", "hf_", "AIza"]
 SCANNED_TEXT_SUFFIXES = {".py", ".txt", ".json", ".cfg", ".ini", ".toml", ".md",
                          ".bat", ".ps1", ".yaml", ".yml", ""}
 
@@ -137,13 +137,18 @@ def make_venv(target: Path) -> Path:
 def write_build_info(py: Path, target: Path, dist: Path, commit: str):
     freeze = subprocess.run([str(py), "-m", "pip", "freeze"],
                             capture_output=True, text=True, check=True).stdout
+    # This file ships to users, so no absolute paths: the tree scan (rightly)
+    # fails the build on the builder's home directory, and `pip freeze` names
+    # the local checkout as `whisper-typing @ file:///C:/Users/...`.
+    freeze = "\n".join(line.split(" @ ")[0] if " @ file://" in line else line
+                       for line in freeze.splitlines())
     info = (dist / "BUILD-INFO.txt")
     info.write_text(
         f"commit: {commit}\n"
         f"built: {time.strftime('%Y-%m-%d %H:%M:%S %z')}\n"
-        f"interpreter: {py}\n"
-        f"python: {sys.version.split()[0]} x{struct.calcsize('P') * 8}\n\n"
-        f"pip freeze:\n{freeze}",
+        f"interpreter: clean .venv-build (path and version asserted), python "
+        f"{sys.version.split()[0]} x{struct.calcsize('P') * 8}\n\n"
+        f"pip freeze:\n{freeze}\n",
         encoding="utf-8")
     return info
 

@@ -144,6 +144,10 @@ class SettingsDialog(QDialog):
         advanced_layout.addWidget(QLabel(f"Бэкенд: {self.config.backend if self.config else 'N/A'}"))
         advanced_layout.addWidget(QLabel(f"Модель: {self.config.model_size if self.config else 'N/A'}"))
 
+        # Same dialog as on first run — pick the microphone and hear yourself.
+        self.check_mic_btn = QPushButton("Проверить микрофон…")
+        advanced_layout.addWidget(self.check_mic_btn)
+
         # 2.4.0: the engine is Sherpa-ONNX, locally, always. The other three
         # were removed (see src/backends/__init__.py) — nothing left to choose.
 

@@ -335,6 +335,44 @@ class AudioRecorder:
         except Exception:
             pass
 
+    def switch_device(self, name: str, hostapi: str) -> bool:
+        """Point the recorder at another input device and reopen the stream.
+
+        Used by the first-run dialog and Settings. Refuses mid-recording; may
+        block as long as any other open (call from a background thread).
+        """
+        if not AUDIO_AVAILABLE or self._closed or self._recording:
+            return False
+        with self._stream_lock:
+            if self._closed or self._recording:
+                return False
+            old, self._stream = self._stream, None
+            self._stream_ok = False
+            self.device_name = name or ""
+            self.device_hostapi = hostapi or ""
+            self.device = -1          # a name always wins over the legacy index
+            self._discard_stream(old)
+        return self.open_stream()
+
+    @staticmethod
+    def list_input_devices():
+        """[(index, name, hostapi_name)] for every input-capable device."""
+        out = []
+        if not AUDIO_AVAILABLE:
+            return out
+        try:
+            for idx, info in enumerate(sd.query_devices()):
+                if info.get("max_input_channels", 0) < 1:
+                    continue
+                try:
+                    api = sd.query_hostapis(info["hostapi"])["name"]
+                except Exception:
+                    api = "?"
+                out.append((idx, info.get("name", "?"), api))
+        except Exception as e:
+            logger.warning("DEVICE_ENUM_FAILED | %s: %s", type(e).__name__, e)
+        return out
+
     def recovery_idle_deficit_s(self) -> float:
         """Seconds still to wait before a recovery probe may run (0 = now)."""
         return max(0.0, self.RECOVER_IDLE_GRACE_S - (time.monotonic() - self._last_stop_ts))

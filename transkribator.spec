@@ -74,7 +74,6 @@ hiddenimports += [
 hiddenimports += [
     'numpy',
     'soundfile',
-    'pyaudio',
     'pynput',
 ]
 

@@ -252,7 +252,7 @@ class MainWindow(QMainWindow):
 
         # Show onboarding tooltip on first run
         if self.config.first_run:
-            QTimer.singleShot(500, self._show_onboarding)
+            QTimer.singleShot(500, self.show_first_run_dialog)
 
     def _setup_ui(self):
         self.setWindowTitle("ГолосТекст")
@@ -518,18 +518,29 @@ class MainWindow(QMainWindow):
         except RuntimeError:
             pass
 
-    def _show_onboarding(self):
-        """Show first-run onboarding tooltip."""
-        hotkey = self.config.hotkey.replace("+", "+").upper()
-        tip = f"Нажмите {hotkey} или кнопку микрофона для записи.\nНастройки — при наведении справа."
-        self._text_popup.set_header("Добро пожаловать!")
-        self._show_text_popup(tip)
-        self._text_popup._text_edit.setReadOnly(True)
-        self._text_popup._accept_btn.hide()
-        self._text_popup._copy_btn.hide()
-        self._text_popup.show_with_timeout(8000)
-        self.config.first_run = False
-        self.config.save()
+    def show_first_run_dialog(self):
+        """Pick a microphone and prove it works (first run, or from Settings).
+
+        Replaces the old onboarding tooltip, which named the hotkey and left
+        the user no way to find out whether the default input device was even
+        the right one — the whole "self-setup on a stranger's Windows".
+        """
+        if self._recording or self._processing:
+            self.status_update.emit("Дождитесь окончания записи")
+            return
+        try:
+            from .first_run_dialog import FirstRunDialog
+
+            def _transcribe(audio):
+                text, _elapsed = self.transcriber.transcribe(audio, self.config.sample_rate)
+                return text
+
+            dlg = FirstRunDialog(self.config, self.recorder, _transcribe, parent=self)
+            dlg.exec()
+        except Exception as e:
+            logger.error("FIRST_RUN_DIALOG_FAILED | %s", e, exc_info=True)
+            QMessageBox.information(self, "Ошибка",
+                                    f"Не удалось открыть проверку микрофона:\n{e}")
 
     _NOTIFY_WAV = r"C:\Windows\Media\Windows Notify System Generic.wav"
 
@@ -1159,6 +1170,9 @@ class MainWindow(QMainWindow):
                 self._settings.quality_profile_group.idClicked.connect(
                     lambda btn_id: self._quality_profile_changed(profile_ids.get(btn_id, "balanced"))
                 )
+
+                # "Проверить микрофон…" opens the first-run dialog again
+                self._settings.check_mic_btn.clicked.connect(self.show_first_run_dialog)
 
                 # Init auto-stop controls
                 self._init_auto_stop_controls()
