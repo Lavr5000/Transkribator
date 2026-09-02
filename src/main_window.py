@@ -553,10 +553,13 @@ class MainWindow(QMainWindow):
         main_pos = self.pos()
         popup_height = self._text_popup.height()
 
-        # Проверяем что popup не уйдет за верх экрана
-        screen_geometry = QApplication.screenAt(main_pos).geometry()
+        # Проверяем что popup не уйдет за верх экрана.
+        # screenAt() возвращает None, когда окно оказалось за краем экрана
+        # (79 % всех падений 26.03–20.08); primaryScreen() тоже None в сеансе
+        # без экранов (RDP/headless) — тогда прижим к экрану просто пропускаем.
+        screen = QApplication.screenAt(main_pos) or QApplication.primaryScreen()
         popup_y = main_pos.y() - popup_height - 10
-        if popup_y < screen_geometry.top() + 50:
+        if screen is not None and popup_y < screen.geometry().top() + 50:
             # Если не помещается сверху, показываем снизу
             popup_y = main_pos.y() + self.height() + 10
 
