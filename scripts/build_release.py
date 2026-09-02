@@ -203,7 +203,9 @@ def main():
 
     assert_interpreter()
     version = project_version()
-    commit = subprocess.run(["git", "rev-parse", args.commit], cwd=REPO,
+    # ^{commit} peels annotated tags: BUILD-INFO must name a commit a reader
+    # can check out, not a tag object.
+    commit = subprocess.run(["git", "rev-parse", f"{args.commit}^{{commit}}"], cwd=REPO,
                             capture_output=True, text=True, check=True).stdout.strip()
     print(f"Transkribator {version} from {commit[:12]} ({args.commit})")
 
