@@ -202,6 +202,7 @@ class MainWindow(QMainWindow):
     # minutes and would freeze the GUI thread); results come back via signals
     _start_finished = pyqtSignal(str)  # 'started' | 'warming' | 'error'
     _stop_finished = pyqtSignal(object)  # np.ndarray or None
+    _recovery_finished = pyqtSignal(bool)  # WASAPI recovery probe result
 
     def __init__(self):
         super().__init__()
@@ -306,6 +307,17 @@ class MainWindow(QMainWindow):
 
         # Preload model immediately (in background thread) to eliminate cold start
         QTimer.singleShot(100, self._load_model)
+
+        # A2: get off a WASAPI→MME fallback instead of staying on MME until the
+        # owner notices (2026-09-02: 7 h 40 min / 30 recordings on MME 16 kHz).
+        # The timer is armed only when a fallback is actually in effect; the
+        # first check waits out the startup warm-up.
+        self._recovery_step = 0
+        self._recovery_running = False
+        self._recovery_timer = QTimer(self)
+        self._recovery_timer.setSingleShot(True)
+        self._recovery_timer.timeout.connect(self._run_recovery_probe)
+        QTimer.singleShot(30_000, self._arm_recovery_if_needed)
 
         # Show onboarding tooltip on first run
         if self.config.first_run:
@@ -602,6 +614,71 @@ class MainWindow(QMainWindow):
             winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT
         )
 
+    # ------------------------------------------------------------------ #
+    # A2: WASAPI recovery after an MME fallback                           #
+    # ------------------------------------------------------------------ #
+
+    RECOVERY_BACKOFF_MIN = (10, 20, 40, 60)  # capped at 60 min
+
+    @classmethod
+    def _recovery_interval_ms(cls, step: int) -> int:
+        idx = min(max(step, 0), len(cls.RECOVERY_BACKOFF_MIN) - 1)
+        return cls.RECOVERY_BACKOFF_MIN[idx] * 60_000
+
+    def _arm_recovery_if_needed(self):
+        """Start (or leave running) the recovery timer iff a fallback is live."""
+        if self._shutting_down:
+            return
+        if not getattr(self.recorder, "capture_fallback_reason", None):
+            return
+        if self._recovery_timer.isActive() or self._recovery_running:
+            return
+        delay = self._recovery_interval_ms(self._recovery_step)
+        logger.info("RECOVER_ARMED | in %d min | reason=%s",
+                    delay // 60_000, self.recorder.capture_fallback_reason)
+        self._recovery_timer.start(delay)
+
+    def _run_recovery_probe(self):
+        """Timer fired: probe WASAPI in a worker thread, never on the Qt thread."""
+        if self._shutting_down or self._recovery_running:
+            return
+        if not self.recorder.capture_fallback_reason:
+            return
+        if self._recording or self._processing:
+            # Do not touch the device around a dictation — retry the same step.
+            self._recovery_timer.start(self._recovery_interval_ms(self._recovery_step))
+            return
+        deficit = self.recorder.recovery_idle_deficit_s()
+        if deficit > 0:
+            # Still inside the idle grace — waiting is not a failed attempt,
+            # so the backoff must not advance.
+            self._recovery_timer.start(int(deficit * 1000) + 1000)
+            return
+
+        self._recovery_running = True
+
+        def _worker():
+            ok = False
+            try:
+                ok = self.recorder.try_recover_wasapi()
+            except Exception as e:
+                logger.error("RECOVER_ERROR | %s: %s", type(e).__name__, e)
+            finally:
+                self._recovery_finished.emit(bool(ok))
+
+        threading.Thread(target=_worker, daemon=True, name="audio-recover").start()
+
+    def _on_recovery_finished(self, ok: bool):
+        """Runs in the Qt thread: reset the backoff on success, advance on failure."""
+        self._recovery_running = False
+        if ok:
+            self._recovery_step = 0
+            logger.info("RECOVER_OK | back on WASAPI")
+            return
+        self._recovery_step = min(self._recovery_step + 1,
+                                  len(self.RECOVERY_BACKOFF_MIN) - 1)
+        self._arm_recovery_if_needed()
+
     def _connect_signals(self):
         self.status_update.connect(self._set_status)
         self.audio_level_update.connect(self._set_level)
@@ -610,6 +687,7 @@ class MainWindow(QMainWindow):
         self._request_toggle.connect(self._toggle_recording, Qt.ConnectionType.QueuedConnection)
         self._start_finished.connect(self._on_start_finished)
         self._stop_finished.connect(self._on_stop_finished)
+        self._recovery_finished.connect(self._on_recovery_finished)
 
     def _load_model(self):
         def _load_with_status():
@@ -794,6 +872,8 @@ class MainWindow(QMainWindow):
             if not self._hover:
                 self.status_label.hide()
             logger.debug("_start() FAILED: recorder.start() returned %s", result)
+        # A late re-open may have landed on MME — arm the recovery timer then too.
+        self._arm_recovery_if_needed()
 
     def _stop(self):
         logger.debug("_stop() called, _recording=%s, _processing=%s", self._recording, self._processing)

@@ -63,6 +63,8 @@ class AudioRecorder:
     CALLBACK_STALL_SEC = 2.0     # active stream with no callbacks = dead
     WASAPI_RATE = 48000          # Stage 1: this device rejects 16 kHz on WASAPI (R1)
     WASAPI_BLOCKSIZE = 960       # 20 ms @ 48 kHz -> ~30 ms worst-case tail loss
+    RECOVER_IDLE_GRACE_S = 60.0  # no recovery probe within 60 s of a stop()
+    OPEN_RETRY_DELAY_S = 1.0     # settle time before the single WASAPI retry
 
     def __init__(
         self,
@@ -97,6 +99,13 @@ class AudioRecorder:
         self._stream_opening = False
         self._stream_opened_at = 0.0
         self._last_callback_ts = 0.0
+        # Bumped on every activation. A retiring stream's finished_callback
+        # fires while its replacement is already live, so the callback must
+        # know which stream it belongs to before clearing _stream_ok.
+        self._stream_token = 0
+        self._last_stop_ts = 0.0      # monotonic; idle grace for recovery
+        self._fallback_since = 0.0    # monotonic; feeds capture_recovered.sticky_s
+        self._recovering = False      # a try_recover_wasapi() is in flight
 
         # Locks. _lock: recording start/stop state. _state_lock: micro-lock
         # making callback vs start/stop transitions atomic (held microseconds).
@@ -128,6 +137,7 @@ class AudioRecorder:
         self._input_overflow_count = 0
         self.dropped_frames = 0  # sum of the two, set by stop()
         self.device_api: Optional[str] = None  # host API of the open stream, e.g. "mme"/"wasapi"
+        self._last_device_name = "?"
 
         # Stage 1 capture path. capture_rate is the rate frames actually arrive
         # at; sample_rate stays the rate the backends receive (16 kHz), so the
@@ -196,6 +206,7 @@ class AudioRecorder:
                 wasapi_dev = self._wasapi_input_device()
                 if wasapi_dev is None:
                     self.capture_fallback_reason = "no WASAPI input endpoint"
+                    self._fallback_since = time.monotonic()
                 else:
                     attempts.append((wasapi_dev, self.WASAPI_RATE, self.WASAPI_BLOCKSIZE))
             attempts.append((device_param, self.sample_rate, 1024))
@@ -204,72 +215,208 @@ class AudioRecorder:
             open_rate = self.sample_rate
             open_device = device_param
             for idx, (dev, rate, blocksize) in enumerate(attempts):
-                try:
-                    stream = sd.InputStream(
-                        samplerate=rate,
-                        channels=self.channels,
-                        dtype=np.float32,
-                        callback=self._audio_callback,
-                        finished_callback=self._on_stream_finished,
-                        blocksize=blocksize,
-                        device=dev,
-                    )
-                    # Quit may have begun during the (possibly 25s) constructor
-                    if self._closed:
-                        try:
-                            stream.close()
-                        except Exception:
-                            pass
-                        return False
-                    stream.start()
+                is_last = idx == len(attempts) - 1
+                # The WASAPI attempt gets one retry after a settle second:
+                # PortAudioError -9992 "Insufficient memory" is transient, and
+                # without the retry a single hiccup pinned the app to MME for
+                # 7 h 40 min / 30 recordings (2026-09-02).
+                tries = 1 if is_last else 2
+                last_exc = None
+                for attempt_no in range(tries):
+                    if attempt_no:
+                        logger.warning("AUDIO_OPEN_RETRY | rate=%d", rate)
+                        time.sleep(self.OPEN_RETRY_DELAY_S)
+                    try:
+                        stream = self._construct_stream(dev, rate, blocksize)
+                    except Exception as e:
+                        stream, last_exc = None, e
+                        logger.error("AUDIO_OPEN_FAILED | rate=%d | %s: %s",
+                                     rate, type(e).__name__, e)
+                        continue
+                    if stream is None:
+                        return False  # quit began during the constructor
                     open_rate = rate
                     open_device = dev
                     break
-                except Exception as e:
-                    stream = None
-                    is_last = idx == len(attempts) - 1
-                    logger.error("AUDIO_OPEN_FAILED | rate=%d | %s: %s",
-                                 rate, type(e).__name__, e)
-                    if not is_last:
-                        self.capture_fallback_reason = f"{type(e).__name__}: {e}"
-                        log_event("capture_fallback", requested_rate=rate,
-                                  reason=type(e).__name__)
+                if stream is not None:
+                    break
+                if not is_last:
+                    self.capture_fallback_reason = (
+                        f"{type(last_exc).__name__}: {last_exc}" if last_exc else "unknown")
+                    self._fallback_since = time.monotonic()
+                    log_event("capture_fallback", requested_rate=rate,
+                              reason=type(last_exc).__name__ if last_exc else "unknown")
             if stream is None:
                 self._stream_ok = False
                 return False
 
-            self.capture_rate = open_rate
-            self._preroll_max_for(open_rate)
-            self._stream = stream
-            self._stream_ok = True
-            self._stream_opened_at = time.monotonic()
-            self._last_callback_ts = self._stream_opened_at
-            try:
-                # Must describe the device ACTUALLY opened, not the configured
-                # one: on the WASAPI attempt they differ, and device_api is the
-                # field burn-in uses to tell the two capture paths apart.
-                dev_info = (sd.query_devices(open_device) if open_device is not None
-                            else sd.query_devices(kind="input"))
-                dev_name = dev_info["name"]
-                self.device_api = sd.query_hostapis(dev_info["hostapi"])["name"].lower()
-            except Exception:
-                dev_name = "?"
-                self.device_api = None
+            self._activate_stream(stream, open_rate, open_device)
             logger.info("AUDIO_OPEN | device=%s | api=%s | rate=%d | %.1fs",
-                        dev_name, self.device_api, self.capture_rate, time.monotonic() - t0)
+                        self._last_device_name, self.device_api, self.capture_rate,
+                        time.monotonic() - t0)
             log_event("capture_open", device_api=self.device_api,
                       capture_rate=self.capture_rate,
                       fallback_reason=self.capture_fallback_reason,
                       elapsed_s=round(time.monotonic() - t0, 3))
             return True
 
-    def _preroll_max_for(self, rate: int) -> None:
+    def _construct_stream(self, dev, rate, blocksize):
+        """Build and start one PortAudio input stream. Raises on failure.
+
+        Returns None (after closing the stream) if the app started quitting
+        during the constructor, which can block for 25 s on a degraded stack.
+        """
+        token = self._stream_token + 1
+
+        def _finished():
+            # A retiring stream fires this while its replacement is already
+            # live — only the current stream may clear the ok flag.
+            if self._stream_token == token:
+                self._stream_ok = False
+
+        stream = sd.InputStream(
+            samplerate=rate,
+            channels=self.channels,
+            dtype=np.float32,
+            callback=self._audio_callback,
+            finished_callback=_finished,
+            blocksize=blocksize,
+            device=dev,
+        )
+        if self._closed:
+            try:
+                stream.close()
+            except Exception:
+                pass
+            return None
+        stream.start()
+        stream._tk_token = token
+        return stream
+
+    def _activate_stream(self, stream, open_rate, open_device, state_locked=False):
+        """Make `stream` the live stream. Caller holds _stream_lock."""
+        self.capture_rate = open_rate
+        self._preroll_max_for(open_rate, state_locked=state_locked)
+        self._stream_token = getattr(stream, "_tk_token", self._stream_token + 1)
+        self._stream = stream
+        self._stream_ok = True
+        self._stream_opened_at = time.monotonic()
+        self._last_callback_ts = self._stream_opened_at
+        try:
+            # Must describe the device ACTUALLY opened, not the configured
+            # one: on the WASAPI attempt they differ, and device_api is the
+            # field burn-in uses to tell the two capture paths apart.
+            dev_info = (sd.query_devices(open_device) if open_device is not None
+                        else sd.query_devices(kind="input"))
+            self._last_device_name = dev_info["name"]
+            self.device_api = sd.query_hostapis(dev_info["hostapi"])["name"].lower()
+        except Exception:
+            self._last_device_name = "?"
+            self.device_api = None
+
+    @staticmethod
+    def _discard_stream(stream):
+        """Stop and close a stream, swallowing everything. May block ~14 s."""
+        if stream is None:
+            return
+        try:
+            stream.stop()
+            stream.close()
+        except Exception:
+            pass
+
+    def recovery_idle_deficit_s(self) -> float:
+        """Seconds still to wait before a recovery probe may run (0 = now)."""
+        return max(0.0, self.RECOVER_IDLE_GRACE_S - (time.monotonic() - self._last_stop_ts))
+
+    def try_recover_wasapi(self) -> bool:
+        """Try to get back onto WASAPI after a fallback to MME.
+
+        The live MME stream is NEVER closed until a WASAPI replacement is
+        already open and started — a failed attempt must not cost the owner a
+        single dictation. Returns True only when the swap happened.
+
+        The only stream-lifecycle entry point besides open_stream() and
+        close_stream(); like them, it may block for tens of seconds and must
+        be called from a background thread.
+        """
+        if not AUDIO_AVAILABLE or self._closed:
+            return False
+        if not self.capture_wasapi_requested or not self.capture_fallback_reason:
+            return False
+        if self._recording:
+            return False
+        if self.recovery_idle_deficit_s() > 0:
+            return False
+
+        wasapi_dev = self._wasapi_input_device()
+        if wasapi_dev is None:
+            logger.info("RECOVER_SKIP | no WASAPI input endpoint")
+            return False
+
+        with self._stream_lock:
+            if self._closed or self._recording or not self.capture_fallback_reason:
+                return False
+            old = self._stream
+            self._recovering = True
+            t0 = time.monotonic()
+            try:
+                # Strategy PROBE_THEN_SWAP: PortAudio allows a shared-mode
+                # WASAPI stream alongside the live MME one, so the candidate is
+                # opened first and the MME stream only dies once it is running.
+                logger.info("RECOVER_STRATEGY | probe_then_swap")
+                try:
+                    candidate = self._construct_stream(
+                        wasapi_dev, self.WASAPI_RATE, self.WASAPI_BLOCKSIZE)
+                except Exception as e:
+                    logger.warning("RECOVER_FAILED | %s: %s", type(e).__name__, e)
+                    log_event("capture_recover_failed", reason=type(e).__name__)
+                    return False
+                if candidate is None:
+                    return False
+
+                # A hotkey may have started a recording while the candidate was
+                # opening (that open is not instant). Re-check under the lock
+                # the callback uses, so the swap can never land mid-recording.
+                with self._state_lock:
+                    busy = self._recording
+                    if not busy:
+                        sticky_s = round(time.monotonic() - self._fallback_since, 1)
+                        self._activate_stream(candidate, self.WASAPI_RATE, wasapi_dev,
+                                              state_locked=True)
+                        self.capture_fallback_reason = None
+                if busy:
+                    logger.info("RECOVER_DEFERRED | recording started during probe")
+                    self._discard_stream(candidate)
+                    return False
+
+                self._discard_stream(old)
+                logger.info("AUDIO_RECOVERED | device=%s | api=%s | rate=%d | "
+                            "sticky=%.0fs | %.1fs",
+                            self._last_device_name, self.device_api, self.capture_rate,
+                            sticky_s, time.monotonic() - t0)
+                log_event("capture_recovered", device_api=self.device_api,
+                          capture_rate=self.capture_rate, sticky_s=sticky_s,
+                          elapsed_s=round(time.monotonic() - t0, 3))
+                return True
+            finally:
+                self._recovering = False
+
+    def _preroll_max_for(self, rate: int, state_locked: bool = False) -> None:
         """Rescale the pre-roll ring to PREROLL_SEC at `rate` (0.4 s = 19 200
-        samples @48 kHz). Frames captured at another rate are dropped."""
+        samples @48 kHz). Frames captured at another rate are dropped.
+
+        `state_locked=True` when the caller already holds _state_lock (the
+        recovery swap does, and the lock is not reentrant).
+        """
         new_max = int(self.PREROLL_SEC * rate)
         if new_max == self.PREROLL_MAX_SAMPLES:
             return
         self.PREROLL_MAX_SAMPLES = new_max
+        if state_locked:
+            self._preroll.clear()
+            self._preroll_samples = 0
+            return
         with self._state_lock:
             self._preroll.clear()
             self._preroll_samples = 0
@@ -309,11 +456,7 @@ class AudioRecorder:
         with self._stream_lock:
             if self._stream is not None:
                 t0 = time.monotonic()
-                try:
-                    self._stream.stop()
-                    self._stream.close()
-                except Exception:
-                    pass
+                self._discard_stream(self._stream)
                 self._stream = None
                 logger.info("AUDIO_CLOSE | %.1fs", time.monotonic() - t0)
             self._stream_ok = False
@@ -335,10 +478,6 @@ class AudioRecorder:
                 and now - self._last_callback_ts >= self.CALLBACK_STALL_SEC):
             return False
         return True
-
-    def _on_stream_finished(self):
-        """sounddevice finished_callback — stream stopped/aborted."""
-        self._stream_ok = False
 
     # ------------------------------------------------------------------ #
     # Capture                                                             #
@@ -571,6 +710,7 @@ class AudioRecorder:
 
             with self._state_lock:
                 self._recording = False
+            self._last_stop_ts = time.monotonic()  # idle grace for try_recover_wasapi
             # No producer can enqueue past this point (callback checks
             # _recording under the same lock) — sentinel is guaranteed last.
             try:

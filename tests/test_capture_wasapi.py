@@ -6,6 +6,7 @@ resample-at-stop, deferred WebRTC — not the actual driver.
 """
 
 import sys
+import threading
 import types
 from unittest.mock import patch
 
@@ -67,12 +68,23 @@ HOSTAPIS = [
 ]
 
 
+def _wait_for(pred, timeout=5.0):
+    """Spin until `pred()` is true — no sleeps baked into the assertions."""
+    deadline = ar_mod.time.monotonic() + timeout
+    while ar_mod.time.monotonic() < deadline:
+        if pred():
+            return True
+        ar_mod.time.sleep(0.005)
+    raise AssertionError("condition not reached within timeout")
+
+
 @pytest.fixture
 def rec_factory():
     made = []
 
     def make(**kw):
         r = AudioRecorder(**kw)
+        r.OPEN_RETRY_DELAY_S = 0.0   # keep the suite fast; production waits 1 s
         made.append(r)
         return r
 
@@ -115,7 +127,8 @@ def test_wasapi_open_failure_falls_back_visibly(rec_factory):
          patch.object(ar_mod, "AUDIO_AVAILABLE", True), \
          patch.object(ar_mod, "log_event", lambda ev, **kw: events.append((ev, kw))):
         assert rec.open_stream() is True
-    assert [k["samplerate"] for k in sd.opened] == [48000, 16000]
+    # A2: the WASAPI attempt is retried once before MME is accepted.
+    assert [k["samplerate"] for k in sd.opened] == [48000, 48000, 16000]
     assert rec.capture_rate == 16000
     assert rec.device_api == "mme", "history must show the fallback API"
     assert rec.capture_fallback_reason, "fallback must not be silent"
@@ -225,3 +238,233 @@ def test_preroll_rescale_clears_stale_frames(rec_factory):
 def test_config_flag_defaults_off():
     from src.config import Config
     assert Config().capture_wasapi is False
+
+
+# --------------------------------------------------------------------------- #
+# A2 — the MME fallback must not be permanent (2026-09-02: 7 h 40 min stuck)   #
+# --------------------------------------------------------------------------- #
+
+
+def _mme_then_wasapi_sd(gate=None):
+    """sounddevice stub where the 48 kHz open fails N times, then succeeds.
+
+    `gate`, when given, is a threading.Event the 48 kHz constructor waits on —
+    used to hold a recovery probe open while a recording starts.
+    """
+    state = {"wasapi_failures": 0}
+    opened = []
+
+    def InputStream(**kw):
+        opened.append(kw)
+        if kw["samplerate"] == 48000:
+            if state["wasapi_failures"] > 0:
+                state["wasapi_failures"] -= 1
+                raise RuntimeError("PortAudioError -9992 Insufficient memory")
+            if gate is not None:
+                gate.wait(5.0)
+        return _FakeStream(**kw)
+
+    return types.SimpleNamespace(
+        InputStream=InputStream,
+        opened=opened,
+        state=state,
+        query_hostapis=lambda index=None: (
+            HOSTAPIS[index] if index is not None else HOSTAPIS),
+        query_devices=lambda dev=None, kind=None: {
+            "name": f"Fake Mic {dev}", "hostapi": 1 if dev == 7 else 0},
+    )
+
+
+def _fallen_back_recorder(rec_factory, sd, events):
+    """Open a recorder that failed onto MME, ready for a recovery attempt."""
+    rec = rec_factory(capture_wasapi=True, webrtc_enabled=False)
+    with patch.object(ar_mod, "sd", sd), \
+         patch.object(ar_mod, "AUDIO_AVAILABLE", True), \
+         patch.object(ar_mod, "log_event", lambda ev, **kw: events.append((ev, kw))):
+        assert rec.open_stream() is True
+    assert rec.device_api == "mme"
+    assert rec.capture_fallback_reason
+    rec._last_stop_ts = 0.0          # long idle: monotonic() is far past 0
+    rec._fallback_since = ar_mod.time.monotonic() - 900
+    return rec
+
+
+def test_a_transient_wasapi_error_is_retried_not_a_fallback(rec_factory):
+    """(a) First 48 kHz open throws, the retry succeeds -> no fallback at all."""
+    sd = _mme_then_wasapi_sd()
+    sd.state["wasapi_failures"] = 1
+    rec = rec_factory(capture_wasapi=True, webrtc_enabled=False)
+    events = []
+    with patch.object(ar_mod, "sd", sd), \
+         patch.object(ar_mod, "AUDIO_AVAILABLE", True), \
+         patch.object(ar_mod, "log_event", lambda ev, **kw: events.append((ev, kw))):
+        assert rec.open_stream() is True
+
+    assert [k["samplerate"] for k in sd.opened] == [48000, 48000]
+    assert rec.capture_rate == 48000
+    assert rec.device_api == "windows wasapi"
+    assert rec.capture_fallback_reason is None
+    assert "capture_fallback" not in [e[0] for e in events]
+
+
+def test_b_both_wasapi_attempts_failing_falls_back_with_reason(rec_factory):
+    """(b) Retry exhausted -> MME, visible reason, capture_fallback event."""
+    sd = _mme_then_wasapi_sd()
+    sd.state["wasapi_failures"] = 99
+    events = []
+    rec = _fallen_back_recorder(rec_factory, sd, events)
+
+    assert [k["samplerate"] for k in sd.opened] == [48000, 48000, 16000]
+    assert "Insufficient memory" in rec.capture_fallback_reason
+    assert "capture_fallback" in [e[0] for e in events]
+
+
+def test_c_recovery_swaps_back_to_wasapi_and_reports_sticky(rec_factory):
+    """(c) A later probe succeeds -> WASAPI live, capture_recovered + sticky_s."""
+    sd = _mme_then_wasapi_sd()
+    sd.state["wasapi_failures"] = 99
+    events = []
+    rec = _fallen_back_recorder(rec_factory, sd, events)
+    mme_stream = rec._stream
+    sd.state["wasapi_failures"] = 0
+    events.clear()
+
+    with patch.object(ar_mod, "sd", sd), \
+         patch.object(ar_mod, "AUDIO_AVAILABLE", True), \
+         patch.object(ar_mod, "log_event", lambda ev, **kw: events.append((ev, kw))):
+        assert rec.try_recover_wasapi() is True
+
+    assert rec.device_api == "windows wasapi"
+    assert rec.capture_rate == 48000
+    assert rec.capture_fallback_reason is None
+    assert rec._stream is not mme_stream
+    assert mme_stream.active is False, "the MME stream must be closed after the swap"
+    recovered = [kw for ev, kw in events if ev == "capture_recovered"]
+    assert recovered and recovered[0]["sticky_s"] >= 900
+    # The retired MME stream's finished_callback must not kill the new stream.
+    assert rec._stream_ok is True
+
+
+def test_d_failed_probe_leaves_the_mme_stream_untouched(rec_factory):
+    """(d) Probe fails -> same MME stream object, still alive, still on MME."""
+    sd = _mme_then_wasapi_sd()
+    sd.state["wasapi_failures"] = 99
+    events = []
+    rec = _fallen_back_recorder(rec_factory, sd, events)
+    mme_stream = rec._stream
+    events.clear()
+
+    with patch.object(ar_mod, "sd", sd), \
+         patch.object(ar_mod, "AUDIO_AVAILABLE", True), \
+         patch.object(ar_mod, "log_event", lambda ev, **kw: events.append((ev, kw))):
+        assert rec.try_recover_wasapi() is False
+
+    assert rec._stream is mme_stream and mme_stream.active is True
+    assert rec.device_api == "mme"
+    assert rec.capture_fallback_reason, "still on the fallback"
+    assert "capture_recover_failed" in [e[0] for e in events]
+
+
+def test_e_recovery_skipped_while_recording_or_too_soon(rec_factory):
+    """(e) No probe during a recording, and none within the 60 s idle grace."""
+    sd = _mme_then_wasapi_sd()
+    sd.state["wasapi_failures"] = 99
+    rec = _fallen_back_recorder(rec_factory, sd, [])
+    sd.state["wasapi_failures"] = 0
+    before = len(sd.opened)
+
+    with patch.object(ar_mod, "sd", sd), patch.object(ar_mod, "AUDIO_AVAILABLE", True):
+        rec._recording = True
+        assert rec.try_recover_wasapi() is False
+        rec._recording = False
+
+        rec._last_stop_ts = ar_mod.time.monotonic() - 5     # 5 s < 60 s grace
+        assert rec.try_recover_wasapi() is False
+
+        rec._last_stop_ts = ar_mod.time.monotonic() - 120   # grace satisfied
+        assert rec.try_recover_wasapi() is True
+
+    assert len(sd.opened) == before + 1, "only the third call may touch the device"
+
+
+def test_f_recording_started_during_probe_cancels_the_swap(rec_factory):
+    """(f) A hotkey wins the race: candidate closed, MME kept, frames intact."""
+    gate = threading.Event()
+    sd = _mme_then_wasapi_sd(gate=gate)
+    sd.state["wasapi_failures"] = 99
+    rec = _fallen_back_recorder(rec_factory, sd, [])
+    sd.state["wasapi_failures"] = 0
+    mme_stream = rec._stream
+    result = {}
+    probes = len([k for k in sd.opened if k["samplerate"] == 48000])
+
+    with patch.object(ar_mod, "sd", sd), patch.object(ar_mod, "AUDIO_AVAILABLE", True):
+        t = threading.Thread(target=lambda: result.update(ok=rec.try_recover_wasapi()))
+        t.start()
+        # Wait until the probe is actually blocked inside the 48 kHz constructor,
+        # so the race under test is the swap re-check, not the entry guard.
+        _wait_for(lambda: len([k for k in sd.opened if k["samplerate"] == 48000]) > probes)
+        assert rec.start() == "started"
+        frame = np.full((1024, 1), 0.25, dtype=np.float32)
+        rec._audio_callback(frame, 1024, None, None)
+        gate.set()
+        t.join(10)
+        assert not t.is_alive()
+        audio = rec.stop()
+
+    assert result["ok"] is False, "the swap must be cancelled, not completed"
+    assert rec._stream is mme_stream and mme_stream.active is True
+    assert rec.capture_rate == 16000 and rec.device_api == "mme"
+    assert audio is not None and len(audio) == 1024, "the recording lost no frames"
+
+
+def test_g_start_during_recovery_is_immediate(rec_factory):
+    """(g) start() never waits on _stream_lock while a probe holds it."""
+    gate = threading.Event()
+    sd = _mme_then_wasapi_sd(gate=gate)
+    sd.state["wasapi_failures"] = 99
+    rec = _fallen_back_recorder(rec_factory, sd, [])
+    sd.state["wasapi_failures"] = 0
+    probes = len([k for k in sd.opened if k["samplerate"] == 48000])
+
+    with patch.object(ar_mod, "sd", sd), patch.object(ar_mod, "AUDIO_AVAILABLE", True):
+        t = threading.Thread(target=rec.try_recover_wasapi)
+        t.start()
+        # _stream_lock is now held by the blocked probe.
+        _wait_for(lambda: len([k for k in sd.opened if k["samplerate"] == 48000]) > probes)
+        t0 = ar_mod.time.monotonic()
+        status = rec.start()
+        elapsed = ar_mod.time.monotonic() - t0
+        gate.set()
+        t.join(10)
+        rec.stop()
+
+    assert status == "started", "dictation must use the live MME stream at once"
+    assert elapsed < 0.5, f"start() waited {elapsed:.2f}s on the recovery probe"
+
+
+def test_recovery_backoff_is_10_20_40_60_capped():
+    """(d, timer half) Failures widen the retry interval; success resets it."""
+    from src.main_window import MainWindow
+
+    assert [MainWindow._recovery_interval_ms(i) // 60_000 for i in range(6)] == \
+        [10, 20, 40, 60, 60, 60]
+
+    class _Stub:
+        _recovery_running = True
+        _recovery_step = 0
+        armed = 0
+        RECOVERY_BACKOFF_MIN = MainWindow.RECOVERY_BACKOFF_MIN
+
+        def _arm_recovery_if_needed(self):
+            self.armed += 1
+
+    stub = _Stub()
+    for expected in (1, 2, 3, 3, 3):
+        MainWindow._on_recovery_finished(stub, False)
+        assert stub._recovery_step == expected
+    assert stub.armed == 5, "a failed probe must re-arm the timer"
+
+    MainWindow._on_recovery_finished(stub, True)
+    assert stub._recovery_step == 0, "a successful recovery resets the backoff"
+    assert stub.armed == 5, "success must not re-arm"
