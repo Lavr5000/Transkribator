@@ -1,14 +1,12 @@
-"""Speech recognition backends for GolosText application.
+"""Speech recognition backend for GolosText.
 
-This module provides a unified interface for multiple speech recognition backends:
-- WhisperBackend: OpenAI Whisper implementation (using faster-whisper)
-- SherpaBackend: Sherpa-ONNX with GigaAM models (optimized for Russian)
-- PodlodkaTurboBackend: Whisper-Podlodka-Turbo (Russian fine-tuned)
-- GroqBackend: Groq Whisper cloud API with Sherpa fallback
+Since 2.4.0 there is exactly one: SherpaBackend (Sherpa-ONNX with GigaAM
+models, tuned for Russian). The three engines removed in 2.4.0 — two local
+ones that were never once selected in production, and the cloud one retired
+on 2026-08-24 after 24 timeouts — are gone from the product path and live in
+the git history at tag `cleanup-base-2026-09-02`.
 
-Backends are imported LAZILY: importing this package must not pull optional
-heavy dependencies (torch/transformers/faster_whisper add seconds of startup
-and hundreds of MB of RAM). Only the backend actually requested is imported.
+The import stays lazy so importing this package does not pull sherpa_onnx.
 """
 import importlib
 import importlib.util
@@ -17,10 +15,7 @@ from .base import BaseBackend
 
 __all__ = [
     "BaseBackend",
-    "WhisperBackend",
     "SherpaBackend",
-    "PodlodkaTurboBackend",
-    "GroqBackend",
     "BACKENDS",
     "get_backend",
     "backend_available",
@@ -28,10 +23,7 @@ __all__ = [
 
 # Backend registry: name -> (submodule, class name, core import the backend needs)
 BACKENDS = {
-    "whisper": ("whisper_backend", "WhisperBackend", "faster_whisper"),
     "sherpa": ("sherpa_backend", "SherpaBackend", "sherpa_onnx"),
-    "podlodka-turbo": ("podlodka_turbo_backend", "PodlodkaTurboBackend", "transformers"),
-    "groq": ("groq_backend", "GroqBackend", "groq"),
 }
 
 _CLASS_TO_NAME = {cls: name for name, (_, cls, _) in BACKENDS.items()}
@@ -54,12 +46,7 @@ def get_backend(backend_name: str) -> type:
 
 
 def backend_available(backend_name: str) -> bool:
-    """True when the backend's core dependency is importable.
-
-    Used by the UI to hide/disable backends that cannot work in this
-    install (e.g. the frozen EXE ships sherpa only; whisper/podlodka/groq
-    need a source install with the matching extra).
-    """
+    """True when the backend's core dependency is importable."""
     if backend_name not in BACKENDS:
         return False
     dep = BACKENDS[backend_name][2]
@@ -69,7 +56,7 @@ def backend_available(backend_name: str) -> bool:
         return False
 
 
-def __getattr__(name):  # PEP 562 — keep `from src.backends import WhisperBackend` working
+def __getattr__(name):  # PEP 562 — keep `from src.backends import SherpaBackend` working
     if name in _CLASS_TO_NAME:
         return get_backend(_CLASS_TO_NAME[name])
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

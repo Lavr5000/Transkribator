@@ -54,7 +54,7 @@ class FakeHybridThread:
     """Synchronous stand-in for HybridTranscriptionThread — exercises the
     real _retry_transcription() wiring without real QThread/event-loop
     machinery."""
-    def __init__(self, remote_client, transcriber, audio, sample_rate, enable_remote=False):
+    def __init__(self, transcriber, audio, sample_rate):
         self.transcriber = transcriber
         self.audio = audio
         self.sample_rate = sample_rate
@@ -170,7 +170,7 @@ def _make_window(tmp_path, monkeypatch, paste_calls, clipboard_calls, research_m
     ("cancel", False),
 ])
 def test_research_mode_blocks_done_paths(tmp_path, monkeypatch, behavior, is_remote):
-    """success / Groq-fallback / cancellation all funnel through _done()."""
+    """success / engine-fallback / cancellation all funnel through _done()."""
     paste_calls, clipboard_calls = [], []
     window = _make_window(tmp_path, monkeypatch, paste_calls, clipboard_calls)
     window.transcriber = FakeTranscriber(behavior)

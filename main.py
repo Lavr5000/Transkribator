@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 """
-WhisperTyping - Local Voice Transcription App
+Transkribator - Local Voice Transcription App
 
-A free, unlimited, local voice-to-text application powered by OpenAI's Whisper.
-Works offline, no API keys required, runs entirely on your computer.
+A free, unlimited, local voice-to-text application powered by Sherpa-ONNX and
+the Russian GigaAM v3 model. Works offline, no API keys, no account, nothing
+leaves the machine.
 
 Usage:
     python main.py
-
-Or after installation:
-    whisper-typing
 """
 
 import sys
@@ -35,19 +33,6 @@ from src.crash_reporter import CrashReporter
 crash_reporter = CrashReporter()
 crash_reporter.install()
 
-# Retry unsent Telegram notifications from previous crashes.
-# Runs in a daemon thread so a slow/unreachable Telegram never delays startup.
-def _retry_unsent_notifications():
-    try:
-        from src.notifier import TelegramNotifier
-        TelegramNotifier(crash_dir=crash_reporter.crash_dir).send_unsent()
-    except Exception:
-        pass
-
-import threading
-threading.Thread(target=_retry_unsent_notifications, daemon=True).start()
-
-
 def check_dependencies():
     """Check if all required dependencies are installed."""
     missing = []
@@ -72,28 +57,10 @@ def check_dependencies():
     except ImportError:
         missing.append("numpy")
 
-    # Check for at least one transcription backend
-    has_backend = False
-
     try:
         import sherpa_onnx
-        has_backend = True
     except ImportError:
-        pass
-
-    if not has_backend:
-        try:
-            from faster_whisper import WhisperModel
-            has_backend = True
-        except ImportError:
-            try:
-                import whisper
-                has_backend = True
-            except ImportError:
-                pass
-
-    if not has_backend:
-        missing.append("sherpa-onnx (recommended) or faster-whisper")
+        missing.append("sherpa-onnx")
 
     if missing:
         print("Missing dependencies:")
@@ -103,8 +70,6 @@ def check_dependencies():
         print("  pip install .")
         print("\nOptional extras:")
         print('  pip install ".[nlp]"      # morphology corrections')
-        print('  pip install ".[whisper]"  # Whisper backend')
-        print('  pip install ".[gpu]"      # CUDA acceleration')
         return False
 
     return True

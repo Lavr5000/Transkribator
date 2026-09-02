@@ -31,24 +31,12 @@ echo.
 echo Upgrading pip...
 python -m pip install --upgrade pip
 
-REM Ask for GPU support
+REM Install the app and its dependencies. There are no requirements*.txt
+REM files in this repo — dependencies live in pyproject.toml, and [nlp] adds
+REM the pymorphy3 dictionaries used for Russian morphology corrections.
 echo.
-set /p GPU_SUPPORT="Do you have an NVIDIA GPU and want GPU acceleration? (y/n): "
-
-if /i "%GPU_SUPPORT%"=="y" (
-    echo.
-    echo Installing GPU version...
-    pip install -r requirements-gpu.txt
-) else (
-    echo.
-    echo Installing CPU version...
-    pip install -r requirements.txt
-)
-
-REM Install package
-echo.
-echo Installing WhisperTyping...
-pip install -e .
+echo Installing Transkribator...
+pip install -e ".[nlp]"
 
 REM Create shortcut
 echo.

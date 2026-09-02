@@ -18,7 +18,7 @@ Field semantics (units / nullability / source clock):
     flags              list[str], subset of {"clipping", "low_signal",
                        "capture_degraded"}.
     dropped_frames     int, queue.Full + input-overflow count for this recording.
-    used_fallback      bool, True if the Groq→Sherpa fallback served this request.
+    used_fallback      bool, kept from the cloud era; always False since 2.4.0.
     fallback_reason    str|None, short cause tag when used_fallback is True.
     device_api         str|None, capture host API actually used (e.g. "mme", "wasapi").
     prompt_version     int|None, opaque local version ID of the prompt sent (versions.py).
@@ -146,7 +146,7 @@ class HistoryManager:
         Args:
             text: Transcribed text
             duration: API elapsed time in seconds (legacy name, see api_elapsed_s)
-            backend: Backend used (whisper, sherpa, groq, etc.)
+            backend: Backend used (sherpa)
             model: Model used
             audio_duration_s..trigger_id: schema-v2 fields, see module docstring
         """

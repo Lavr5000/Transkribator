@@ -2,9 +2,12 @@
 
 All lookups check os.environ first. Optionally, the TRANSKRIBATOR_KEYSTORE
 environment variable may point to a directory containing a ``.env`` file
-(``NAME=value`` lines) and a ``sessions/`` subdirectory for Telethon.
-Without that variable nothing is read from disk, so a clean install never
-touches machine-specific paths.
+(``NAME=value`` lines). Without that variable nothing is read from disk, so
+a clean install never touches machine-specific paths.
+
+The only consumer is main.py, which injects HF_TOKEN so a SOURCE install can
+download models from HuggingFace. The released build ships the model, so this
+path never runs there.
 """
 import os
 from pathlib import Path
@@ -37,8 +40,3 @@ def load_env_var(name: str) -> Optional[str]:
             pass
     return None
 
-
-def telegram_session_path() -> Optional[str]:
-    """Path to the Telethon session file, or None when keystore not set."""
-    ks = keystore_dir()
-    return str(ks / "sessions" / "telegram_session") if ks else None

@@ -77,11 +77,21 @@ class AudioRecorder:
         noise_suppression_level: int = 2,
         auto_gain_dbfs: int = 3,
         capture_wasapi: bool = False,
+        device_name: str = "",
+        device_hostapi: str = "",
+        on_device_resolved: Optional[Callable[[str, str], None]] = None,
     ):
         self.sample_rate = sample_rate
         self.channels = channels
         self.on_level_update = on_level_update
+        # Devices are addressed by host API + name; `device` is only the legacy
+        # PortAudio index from a <= 2.3 config, used once and then written back
+        # as a name through on_device_resolved.
         self.device = device
+        self.device_name = device_name or ""
+        self.device_hostapi = device_hostapi or ""
+        self.on_device_resolved = on_device_resolved
+        self.device_warning: Optional[str] = None
         self.mic_boost = mic_boost
         self.webrtc_enabled = webrtc_enabled and _WEBRTC_AVAILABLE
         self.noise_suppression_level = noise_suppression_level
@@ -196,7 +206,7 @@ class AudioRecorder:
                 self._stream = None
                 self._stream_ok = False
 
-            device_param = None if self.device == -1 else self.device
+            device_param = self._resolve_device()
             t0 = time.monotonic()
 
             # Stage 1: WASAPI @48 kHz first when requested, MME @16 kHz as the
@@ -420,6 +430,55 @@ class AudioRecorder:
         with self._state_lock:
             self._preroll.clear()
             self._preroll_samples = 0
+
+    def _resolve_device(self) -> Optional[int]:
+        """PortAudio index for the configured device, or None for the default.
+
+        Preference order: stored host API + name (stable across reboots and
+        re-plugs) -> legacy index from an old config (resolved once, then
+        reported back as a name) -> system default. A configured device that
+        is not present is NOT an error: fall back to the default and leave a
+        message in device_warning for the status line.
+        """
+        self.device_warning = None
+        if self.device_name:
+            try:
+                for idx, info in enumerate(sd.query_devices()):
+                    if info.get("max_input_channels", 0) < 1:
+                        continue
+                    if info.get("name") != self.device_name:
+                        continue
+                    if self.device_hostapi:
+                        api = sd.query_hostapis(info["hostapi"])["name"].lower()
+                        if api != self.device_hostapi.lower():
+                            continue
+                    return idx
+            except Exception as e:
+                logger.warning("DEVICE_LOOKUP_FAILED | %s: %s", type(e).__name__, e)
+            self.device_warning = (
+                f"Микрофон «{self.device_name}» не найден — использую системный по умолчанию")
+            logger.warning("DEVICE_NOT_FOUND | name=%s api=%s", self.device_name,
+                           self.device_hostapi or "?")
+            return None
+
+        if self.device is not None and self.device != -1:
+            # Legacy index: use it once, then remember what it pointed at.
+            try:
+                info = sd.query_devices(self.device)
+                api = sd.query_hostapis(info["hostapi"])["name"].lower()
+                self.device_name = info["name"]
+                self.device_hostapi = api
+                if self.on_device_resolved:
+                    self.on_device_resolved(self.device_name, self.device_hostapi)
+                logger.info("DEVICE_INDEX_RESOLVED | %d -> %s (%s)",
+                            self.device, self.device_name, self.device_hostapi)
+                return self.device
+            except Exception as e:
+                self.device_warning = (
+                    "Сохранённый микрофон недоступен — использую системный по умолчанию")
+                logger.warning("DEVICE_INDEX_STALE | index=%s | %s: %s",
+                               self.device, type(e).__name__, e)
+        return None
 
     @staticmethod
     def _wasapi_input_device() -> Optional[int]:

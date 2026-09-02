@@ -27,15 +27,12 @@ from .config import Config, MODEL_METADATA
 from .audio_recorder import AudioRecorder
 from .transcriber import Transcriber, get_available_backends
 from .crash_reporter import get_reporter
-from .notifier import TelegramNotifier
-from .quality_monitor import QualityMonitor
 from . import hotkeys
 from .hotkeys import HotkeyManager, type_text, safe_paste_text, paste_from_clipboard
 from .history_manager import HistoryManager
 from . import versions
 from .audio_archive import AudioArchive
 from .mouse_handler import MouseButtonHandler
-from .remote_client import RemoteTranscriptionClient
 from .widgets import (
     COLORS, COLORS_HEX, COMPACT_HEIGHT, COMPACT_WIDTH,
     RecordButton, CopyButton, SettingsButton, CloseButton, CancelButton,
@@ -89,102 +86,35 @@ class TranscriptionThread(QThread):
 
 
 class HybridTranscriptionThread(QThread):
-    """Thread for hybrid transcription: LOCAL first, then remote fallback.
+    """Runs one local transcription off the Qt thread.
 
-    Strategy:
-    1. Try local transcription (Sherpa) first with timeout
-    2. If local fails or takes >20 seconds, try remote
-    3. If remote also fails, return error
+    Named "hybrid" historically: it used to fall back to a cloud engine and
+    to a remote server. Both were removed in 2.4.0 — the app has been
+    local-only since 2026-08-24 and made zero network calls after that — so
+    the only path left is Sherpa on this machine.
     """
     transcription_done = pyqtSignal(str, float, bool)  # text, duration, is_remote
     transcription_error = pyqtSignal(str)
 
-    def __init__(self, remote_client, transcriber, audio, sample_rate: int, enable_remote: bool = False):
+    def __init__(self, transcriber, audio, sample_rate: int):
         super().__init__()
-        self.remote_client = remote_client
         self.transcriber = transcriber
         self.audio = audio
         self.sample_rate = sample_rate
         self._is_cancelled = False
-        self._enable_remote = enable_remote  # Allow disabling remote fallback
-        # Dynamic timeout: min 30s, or 40% of audio duration (for chunked processing)
-        audio_duration_sec = len(audio) / sample_rate
-        self._local_timeout = max(30.0, audio_duration_sec * 0.4)
 
     def run(self):
         try:
             if self._is_cancelled:
                 return
-
-            # === STEP 1: Try LOCAL transcription first ===
-            local_start = time.time()
-            try:
-                # Use threading.Timer to implement timeout
-                import concurrent.futures
-
-                # NOT a context manager: `with` calls shutdown(wait=True) on
-                # timeout, blocking this thread until the local transcription
-                # finishes anyway — the remote fallback would never be faster.
-                executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-                try:
-                    future = executor.submit(
-                        self.transcriber.transcribe,
-                        self.audio,
-                        self.sample_rate
-                    )
-
-                    try:
-                        # Wait for local transcription with timeout
-                        text, duration = future.result(timeout=self._local_timeout)
-
-                        if not self._is_cancelled and text:
-                            # Local transcription successful!
-                            self.transcription_done.emit(text, duration, False)  # is_remote=False
-                            return
-
-                    except concurrent.futures.TimeoutError:
-                        # Local transcription took too long - cancel and try remote
-                        future.cancel()
-                        self.transcriber.cancel()
-                        logger.debug("Local transcription timeout (%.1fs)", self._local_timeout)
-                        raise Exception("Local transcription timeout")
-                finally:
-                    executor.shutdown(wait=False)
-
-            except Exception as local_error:
-                # Local transcription failed - try remote fallback
-                if not self._is_cancelled:
-                    logger.debug("Local transcription failed: %s", local_error)
-                    logger.debug("Trying remote fallback...")
-
-            # === STEP 2: Try REMOTE transcription as fallback (if enabled) ===
-            if not self._is_cancelled and self._enable_remote:
-                try:
-                    remote_start = time.time()
-                    text = self.remote_client.transcribe_remote(
-                        self.audio,
-                        self.sample_rate
-                    )
-                    duration = time.time() - remote_start
-
-                    if not self._is_cancelled and text:
-                        # Remote transcription successful (fallback)
-                        self.transcription_done.emit(text, duration, True)  # is_remote=True
-                        return
-                    else:
-                        raise Exception("Remote transcription returned empty text")
-
-                except Exception as remote_error:
-                    # Both local and remote failed
-                    if not self._is_cancelled:
-                        logger.debug("Remote transcription also failed: %s", remote_error)
-                        self.transcription_error.emit(f"Local and remote failed: {remote_error}")
-
-            # === Remote fallback disabled or not available ===
-            elif not self._is_cancelled:
-                logger.debug("Local transcription failed, remote fallback disabled")
-                self.transcription_error.emit("Local transcription failed. Enable remote fallback in settings if needed.")
-
+            text, duration = self.transcriber.transcribe(self.audio, self.sample_rate)
+            if self._is_cancelled:
+                return
+            if text:
+                self.transcription_done.emit(text, duration, False)
+            else:
+                # transcriber.transcribe() already logged the empty_result event.
+                self.transcription_error.emit("Пустой результат распознавания")
         except Exception as e:
             if not self._is_cancelled:
                 logger.debug("HybridTranscriptionThread error: %s", e)
@@ -215,7 +145,10 @@ class MainWindow(QMainWindow):
             sample_rate=self.config.sample_rate,
             channels=self.config.channels,
             on_level_update=self._on_vad_level_update,
-            device=self.config.audio_device if self.config.audio_device != -1 else None,
+            device=self.config.audio_device_legacy_index,
+            device_name=self.config.audio_device_name,
+            device_hostapi=self.config.audio_hostapi,
+            on_device_resolved=self._on_device_resolved,
             mic_boost=self.config.mic_boost,
             webrtc_enabled=self.config.webrtc_enabled,
             noise_suppression_level=self.config.noise_suppression_level,
@@ -265,10 +198,6 @@ class MainWindow(QMainWindow):
         self.hotkey_manager = HotkeyManager(on_hotkey=self._on_hotkey)
         self.history_manager = HistoryManager(max_entries=50)
         self.audio_archive = AudioArchive(dpapi_enabled=self.config.audio_archive_dpapi)
-        self._quality_monitor = QualityMonitor(TelegramNotifier())
-
-        # Initialize remote transcription client
-        self.remote_client = RemoteTranscriptionClient()
 
         # Initialize mouse button handler
         self.mouse_handler = MouseButtonHandler(
@@ -318,6 +247,8 @@ class MainWindow(QMainWindow):
         self._recovery_timer.setSingleShot(True)
         self._recovery_timer.timeout.connect(self._run_recovery_probe)
         QTimer.singleShot(30_000, self._arm_recovery_if_needed)
+        # A missing configured microphone must be visible, not silent.
+        QTimer.singleShot(30_000, self._show_device_warning)
 
         # Show onboarding tooltip on first run
         if self.config.first_run:
@@ -540,11 +471,9 @@ class MainWindow(QMainWindow):
         self._transcription_start = time.time()
         self._cleanup_thread()
         self._thread = HybridTranscriptionThread(
-            self.remote_client,
             self.transcriber,
             self._last_audio,
             self.config.sample_rate,
-            enable_remote=getattr(self.config, 'enable_remote_fallback', False)
         )
         self._thread.transcription_done.connect(self._done)
         self._thread.transcription_error.connect(self._error)
@@ -613,6 +542,19 @@ class MainWindow(QMainWindow):
             self._NOTIFY_WAV,
             winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT
         )
+
+    def _show_device_warning(self):
+        """Surface a stale/absent configured microphone in the status line."""
+        warning = getattr(self.recorder, "device_warning", None)
+        if warning and not self._recording and not self._processing:
+            self.status_update.emit(warning)
+
+    def _on_device_resolved(self, name: str, hostapi: str):
+        """A legacy PortAudio index was resolved once — store it as a name."""
+        self.config.audio_device_name = name
+        self.config.audio_hostapi = hostapi
+        self.config.audio_device_legacy_index = -1
+        self.config.save()
 
     # ------------------------------------------------------------------ #
     # A2: WASAPI recovery after an MME fallback                           #
@@ -948,13 +890,10 @@ class MainWindow(QMainWindow):
         # Cleanup previous thread if exists
         self._cleanup_thread()
 
-        # Use hybrid transcription (LOCAL first, then remote fallback if enabled)
         self._thread = HybridTranscriptionThread(
-            self.remote_client,
             self.transcriber,
             audio,
             self.config.sample_rate,
-            enable_remote=getattr(self.config, 'enable_remote_fallback', False)
         )
         self._thread.transcription_done.connect(self._done)
         self._thread.transcription_error.connect(self._error)
@@ -1033,23 +972,11 @@ class MainWindow(QMainWindow):
         self.timer_label.setText(f"{self._rec_duration:.1f}→{transcription_time:.1f}с")
         self.timer_label.show()
 
-        # Show mode indicator (local/remote)
-        logger.debug("Transcription time: %.1fs, is_remote=%s", transcription_time, is_remote)
+        logger.debug("Transcription time: %.1fs", transcription_time)
 
         try:
-            if is_remote:  # Remote transcription successful
-                self.mode_label.setText("🌐")
-                self.mode_label.setToolTip("Удаленная транскрибация")
-                logger.debug("Mode: REMOTE (is_remote=True)")
-            elif getattr(self.transcriber, 'last_used_fallback', False):
-                # Groq backend fell back to Sherpa
-                self.mode_label.setText("⚡")
-                self.mode_label.setToolTip("Sherpa (Groq fallback)")
-                logger.debug("Mode: FALLBACK (Groq→Sherpa)")
-            else:  # Local transcription
-                self.mode_label.setText("🏠")
-                self.mode_label.setToolTip("Локальная транскрибация")
-                logger.debug("Mode: LOCAL (is_remote=False)")
+            self.mode_label.setText("🏠")
+            self.mode_label.setToolTip("Локальная транскрибация")
             # Этап 1 (D3): откат WASAPI→MME должен быть виден в UI, а не только
             # в истории. Тултип дополняется, иконка режима не подменяется.
             if self.config.capture_wasapi and self.recorder.capture_rate == self.config.sample_rate:
@@ -1104,12 +1031,6 @@ class MainWindow(QMainWindow):
             prompt_version=versions.prompt_version(getattr(self.transcriber, "last_prompt_sent", None)),
             dictionary_version=versions.dictionary_version(self.config.user_dictionary),
             trigger_id=self._trigger_id,
-        )
-        self._quality_monitor.record_result(
-            text_len=len(text),
-            audio_duration=self._rec_duration,
-            backend=self.config.backend,
-            model=self.config.model_size,
         )
 
         # research_mode (Этап 0, r1-30): experiments must never paste or
@@ -1170,12 +1091,6 @@ class MainWindow(QMainWindow):
         self.close_btn.show()
 
         logger.debug("_error() called: %s -> %s", err, user_msg)
-        self._quality_monitor.record_result(
-            text_len=0,
-            audio_duration=0,
-            backend=self.config.backend,
-            model=self.config.model_size,
-        )
 
     def _show_error_popup(self, message: str):
         """Show error message in TextPopup with retry button."""
@@ -1245,9 +1160,6 @@ class MainWindow(QMainWindow):
                     lambda btn_id: self._quality_profile_changed(profile_ids.get(btn_id, "balanced"))
                 )
 
-                # Connect backend change to update models
-                self._settings.backend_combo.currentIndexChanged.connect(self._backend_changed)
-
                 # Init auto-stop controls
                 self._init_auto_stop_controls()
 
@@ -1273,46 +1185,6 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error("SHOW_SETTINGS_FAILED | %s", e, exc_info=True)
             QMessageBox.information(self, "Ошибка", f"Не удалось открыть настройки:\n{e}")
-
-    def _backend_changed(self):
-        bid = self._settings.backend_combo.currentData()
-        if self._processing and bid != self.config.backend:
-            # Engine is transcribing: reject and revert the combo
-            self.status_update.emit("Дождитесь окончания транскрибации")
-            self._settings.backend_combo.blockSignals(True)
-            idx = self._settings.backend_combo.findData(self.config.backend)
-            if idx >= 0:
-                self._settings.backend_combo.setCurrentIndex(idx)
-            self._settings.backend_combo.blockSignals(False)
-            return
-        if bid != self.config.backend:
-            old_backend = self.config.backend
-            old_model = self.config.model_size
-            cr = get_reporter()
-            if cr:
-                cr.set_context("BACKEND_SWITCH", backend=bid, previous_backend=old_backend)
-            try:
-                self.config.backend = bid
-                self._settings.model_combo.blockSignals(True)
-                self._settings._update_model_options()
-                self._settings.model_combo.blockSignals(False)
-                default = {"whisper": "base", "sherpa": "giga-am-v3-ru-punct", "podlodka-turbo": "podlodka-turbo", "groq": "whisper-large-v3-turbo"}.get(bid, "base")
-                self.config.model_size = default
-                self.config.save()
-                if not self.transcriber.switch_backend(bid, default):
-                    raise RuntimeError("транскрибатор занят, попробуйте после окончания")
-                self._load_model()
-                self._update_model_info_label()
-            except Exception as e:
-                self._settings.model_combo.blockSignals(False)
-                logger.error("BACKEND_SWITCH_FAILED | %s", e, exc_info=True)
-                self.config.backend = old_backend
-                self.config.model_size = old_model
-                self.config.save()
-                self._settings.model_combo.blockSignals(True)
-                self._settings._update_model_options()
-                self._settings.model_combo.blockSignals(False)
-                self.status_update.emit(f"Ошибка смены бэкенда: {e}")
 
     def _model_changed(self):
         mid = self._settings.model_combo.currentData()
@@ -1429,15 +1301,10 @@ class MainWindow(QMainWindow):
                 # combo mutations must not re-fire _backend/_model_changed
                 # with intermediate garbage values)
                 if self._settings:
-                    self._settings.backend_combo.blockSignals(True)
                     self._settings.model_combo.blockSignals(True)
                     try:
-                        backend_idx = self._settings.backend_combo.findData(self.config.backend)
-                        if backend_idx >= 0:
-                            self._settings.backend_combo.setCurrentIndex(backend_idx)
                         self._settings._update_model_options()
                     finally:
-                        self._settings.backend_combo.blockSignals(False)
                         self._settings.model_combo.blockSignals(False)
 
                 logger.info("QUALITY_PROFILE_CHANGED | %s", profile)

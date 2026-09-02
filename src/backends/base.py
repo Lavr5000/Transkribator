@@ -106,10 +106,7 @@ class BaseBackend(ABC):
         """Return backend identifier for text processor configuration.
 
         The backend name is derived from the class name by removing 'Backend' suffix.
-        Examples:
-            WhisperBackend -> "whisper"
-            SherpaBackend -> "sherpa"
-            PodlodkaTurboBackend -> "podlodkaturbo"
+        Example: SherpaBackend -> "sherpa"
 
         Returns:
             Backend name in lowercase for text processor configuration

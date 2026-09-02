@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QCursor
 
-from .config import WHISPER_MODELS, SHERPA_MODELS, PODLODKA_MODELS, GROQ_MODELS, LANGUAGES, BACKENDS, MOUSE_BUTTONS, PASTE_METHODS, QUALITY_PROFILES, MODEL_METADATA
+from .config import SHERPA_MODELS, LANGUAGES, MOUSE_BUTTONS, PASTE_METHODS, QUALITY_PROFILES, MODEL_METADATA
 from .widgets import COLORS, COLORS_HEX, DIALOG_STYLESHEET, DictionaryEntryDialog
 
 
@@ -144,23 +144,8 @@ class SettingsDialog(QDialog):
         advanced_layout.addWidget(QLabel(f"Бэкенд: {self.config.backend if self.config else 'N/A'}"))
         advanced_layout.addWidget(QLabel(f"Модель: {self.config.model_size if self.config else 'N/A'}"))
 
-        # Backend combo
-        backend_group = QGroupBox("Движок")
-        backend_layout = QVBoxLayout(backend_group)
-        self.backend_combo = QComboBox()
-        from src.backends import backend_available
-        for bid, bname in BACKENDS.items():
-            # Hide backends whose core dependency is absent (frozen EXE
-            # ships sherpa only; others need a source install with extras)
-            if not backend_available(bid):
-                continue
-            self.backend_combo.addItem(bname, bid)
-        if self.config:
-            idx = self.backend_combo.findData(self.config.backend)
-            if idx >= 0:
-                self.backend_combo.setCurrentIndex(idx)
-        backend_layout.addWidget(self.backend_combo)
-        advanced_layout.addWidget(backend_group)
+        # 2.4.0: the engine is Sherpa-ONNX, locally, always. The other three
+        # were removed (see src/backends/__init__.py) — nothing left to choose.
 
         # Model combo
         model_group = QGroupBox("Модель")
@@ -592,8 +577,7 @@ class SettingsDialog(QDialog):
         self.model_combo.clear()
         if not self.config:
             return
-        backend = self.backend_combo.currentData() or self.config.backend
-        models = {"whisper": WHISPER_MODELS, "sherpa": SHERPA_MODELS, "podlodka-turbo": PODLODKA_MODELS, "groq": GROQ_MODELS}.get(backend, {})
+        models = SHERPA_MODELS
 
         sorted_models = sorted(models.items(), key=lambda x: MODEL_METADATA.get(x[0], {}).get("rtf", 1.0))
 

@@ -98,15 +98,6 @@ def test_plain_ctc_model_keeps_ml_punctuation_flag():
     assert p2.enable_punctuation is True
 
 
-def test_whisper_like_backends_skip_punctuation():
-    from src.text_processor_enhanced import EnhancedTextProcessor
-    for backend in ("whisper", "podlodkaturbo", "groq"):
-        p = EnhancedTextProcessor(backend=backend)
-        assert p.enable_punctuation is False, backend
-        assert p.enable_phonetics is False, backend
-        assert p.enable_morphology is False, backend
-
-
 # ---------- lazy backend imports ----------
 
 def test_backend_package_import_is_lazy():
@@ -116,10 +107,8 @@ def test_backend_package_import_is_lazy():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     code = (
         "import sys; import src.backends as b; "
-        "assert 'torch' not in sys.modules, 'torch leaked'; "
-        "assert 'faster_whisper' not in sys.modules, 'faster_whisper leaked'; "
-        "assert 'transformers' not in sys.modules, 'transformers leaked'; "
-        "assert set(b.BACKENDS) == {'whisper', 'sherpa', 'podlodka-turbo', 'groq'}; "
+        "assert 'sherpa_onnx' not in sys.modules, 'sherpa_onnx leaked'; "
+        "assert set(b.BACKENDS) == {'sherpa'}; "
         "assert b.SherpaBackend.__name__ == 'SherpaBackend'"
     )
     result = subprocess.run([sys.executable, "-c", code], cwd=root,
@@ -167,30 +156,3 @@ def test_switch_backend_model_change_rebuilds(transcriber):
     assert transcriber.model_size == "giga-am-v3-ru"
     # processor follows the model: plain CTC re-enables ML punctuation flag
     assert transcriber.text_processor.enable_punctuation is True
-
-
-# ---------- notifier: crash path never touches network, queue gated ----------
-
-def test_notifier_queue_noop_without_credentials(tmp_path, monkeypatch):
-    for var in ("TELEGRAM_API_ID", "TELEGRAM_API_HASH", "TRANSKRIBATOR_KEYSTORE", "TELEGRAM_SESSION_PATH"):
-        monkeypatch.delenv(var, raising=False)
-    from src.notifier import TelegramNotifier
-    n = TelegramNotifier(crash_dir=str(tmp_path))
-    assert n.has_credentials() is False
-    assert n.queue_for_next_start("msg") is False
-    assert not os.path.exists(n.unsent_path), "queue file must not be created without credentials"
-
-
-def test_notifier_queue_capped(tmp_path, monkeypatch):
-    monkeypatch.setenv("TELEGRAM_API_ID", "12345")
-    monkeypatch.setenv("TELEGRAM_API_HASH", "hash")
-    monkeypatch.setenv("TELEGRAM_SESSION_PATH", str(tmp_path / "session"))
-    import src.notifier as notifier_mod
-    from src.notifier import TelegramNotifier
-    n = TelegramNotifier(crash_dir=str(tmp_path))
-    assert n.has_credentials() is True
-    for i in range(notifier_mod._MAX_QUEUED_MESSAGES + 10):
-        assert n.queue_for_next_start(f"msg {i}") is True
-    content = open(n.unsent_path, encoding="utf-8").read()
-    count = len([m for m in content.split("---END_MESSAGE---") if m.strip()])
-    assert count == notifier_mod._MAX_QUEUED_MESSAGES
