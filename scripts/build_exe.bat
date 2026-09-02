@@ -1,54 +1,18 @@
 @echo off
-REM Build Transkribator executable using PyInstaller
+REM Thin wrapper over scripts\build_release.py — the real build.
+REM
+REM The release is built from a CLEAN GIT WORKTREE in a fresh venv, never from
+REM the working directory: a repo in daily use carries debug.log, the owner's
+REM config and downloaded models, and PyInstaller happily ships all of it.
 REM
 REM Usage:
-REM   scripts\build_exe.bat
+REM   scripts\build_exe.bat                 build HEAD, produce the ZIP
+REM   scripts\build_exe.bat --dry-run       build and scan, no ZIP
+REM   scripts\build_exe.bat --commit v2.4.0
 REM
-REM Output:
-REM   dist\transkribator\Transkribator.exe
+REM Output: dist\Transkribator-v<version>-win64.zip + dist\SHA256SUMS.txt
 
-setlocal enabledelayedexpansion
-
-echo ========================================
-echo Transkribator Build Script
-echo ========================================
-echo.
-
-REM Check if pyinstaller is available
-where pyinstaller >nul 2>nul
-if %ERRORLEVEL% NEQ 0 (
-    echo ERROR: PyInstaller not found!
-    echo Please install: pip install pyinstaller
-    exit /b 1
-)
-
-REM Clean previous builds
-echo Cleaning previous builds...
-if exist build rmdir /s /q build
-if exist dist rmdir /s /q dist
-echo Done.
-echo.
-
-REM Run PyInstaller
-echo Building executable...
-pyinstaller --clean transkribator.spec
-
-REM Check exit code
-if %ERRORLEVEL% NEQ 0 (
-    echo.
-    echo ========================================
-    echo BUILD FAILED!
-    echo ========================================
-    exit /b 1
-)
-
-echo.
-echo ========================================
-echo BUILD SUCCESS!
-echo ========================================
-echo.
-echo Output location: dist\transkribator\
-echo Executable: dist\transkribator\Transkribator.exe
-echo.
-
-pause
+setlocal
+cd /d "%~dp0.."
+python scripts\build_release.py %*
+exit /b %ERRORLEVEL%

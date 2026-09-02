@@ -30,17 +30,10 @@ datas += collect_data_files('pymorphy3_dicts_ru')
 hiddenimports = []
 hiddenimports += collect_submodules('sherpa_onnx')
 hiddenimports += ['pymorphy3', 'pymorphy3_dicts_ru']
-# Backend modules are imported LAZILY by src.backends.get_backend(), so
-# PyInstaller cannot discover them statically — list them explicitly.
-# The modules themselves are thin; their heavy deps (torch/faster_whisper/
-# groq SDK) stay in `excludes`, each module degrades gracefully without them
-# (a stale config.json pointing at an unavailable backend must not crash
-# the frozen app — it falls back instead).
+# The backend module is imported LAZILY by src.backends.get_backend(), so
+# PyInstaller cannot discover it statically.
 hiddenimports += [
     'src.backends.sherpa_backend',
-    'src.backends.whisper_backend',
-    'src.backends.podlodka_turbo_backend',
-    'src.backends.groq_backend',
     'src.dev_keys',
 ]
 
@@ -66,10 +59,12 @@ hiddenimports += [
     'src.mouse_handler',
     'src.transcriber',
     'src.backends',
-    'src.remote_client',
     'src.crash_reporter',
-    'src.notifier',
-    'src.quality_monitor',
+    'src.event_log',
+    'src.resampler',
+    'src.fir_taps_48to16',
+    'src.audio_archive',
+    'src.versions',
     'src.widgets',
     'src.settings_dialog',
     'src.morph_singleton',
@@ -118,13 +113,15 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+# onedir: the EXE is only the bootloader + bytecode. Passing binaries/
+# zipfiles/datas here AS WELL AS to COLLECT (as v2.2.0 did) duplicated the
+# whole payload — a 245 MB Transkribator.exe next to an identical _internal/,
+# which is most of why the 2.2.0 release ZIP was 774 MB.
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='Transkribator',
     debug=False,
     bootloader_ignore_signals=False,
