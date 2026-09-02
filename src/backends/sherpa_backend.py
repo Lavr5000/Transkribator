@@ -86,6 +86,7 @@ class SherpaBackend(BaseBackend):
         vad_threshold: float = 0.5,
         min_silence_duration_ms: int = 800,
         min_speech_duration_ms: int = 500,
+        legacy_prompt_removed: bool = True,  # legacy cloud-prompt flag, kept for interface parity
     ):
         """
         Initialize Sherpa-ONNX backend.
@@ -441,28 +442,41 @@ class SherpaBackend(BaseBackend):
             # Apply VAD to filter silence if enabled
             if self._vad_enabled and self._vad is not None:
                 window_size = self._vad.window_size()
-                speech_windows = []
-                has_speech = False
-                for i in range(0, len(audio), window_size):
+                starts = list(range(0, len(audio), window_size))
+                flags = []
+                for i in starts:
                     window = audio[i:i + window_size]
                     if len(window) < window_size:
                         # Pad last window for VAD check
                         padded = np.zeros(window_size, dtype=np.float32)
                         padded[:len(window)] = window
-                        is_speech = self._vad.is_speech(padded.tolist())
+                        flags.append(self._vad.is_speech(padded.tolist()))
                     else:
-                        is_speech = self._vad.is_speech(window.tolist())
-                    if is_speech:
-                        has_speech = True
-                        speech_windows.append(audio[i:min(i + window_size, len(audio))])
+                        flags.append(self._vad.is_speech(window.tolist()))
+                has_speech = any(flags)
 
-                if has_speech and speech_windows:
-                    audio = np.concatenate(speech_windows)
-                    logger.debug("VAD_FILTER | kept %d/%d windows", len(speech_windows),
-                                 len(audio) // window_size + 1)
-                elif not has_speech:
-                    logger.debug("VAD_NO_SPEECH | audio=%.1fs", len(audio) / 16000.0)
-                    return "", 0.0
+                if has_speech:
+                    # ponytail: trim the TAIL only. Head trimming kept eating the
+                    # first words: WebRTC AGC ramps up over the first ~1s, so the
+                    # opening word is quiet, VAD scores it as silence and no pad
+                    # size reliably saves it ("Направляю финмодель" vanished twice).
+                    # Leading silence costs ~0.04 RTF-seconds to transcribe and
+                    # GigaAM CTC does not hallucinate on it — cheap insurance.
+                    pad_tail = int(0.3 * 16000)
+                    first = starts[flags.index(True)]
+                    last = starts[len(flags) - 1 - flags[::-1].index(True)] + window_size
+                    lo = 0
+                    hi = min(len(audio), last + pad_tail)
+                    logger.debug("VAD_TRIM | %.2fs -> %.2fs | first_speech=%.2fs",
+                                 len(audio) / 16000.0, (hi - lo) / 16000.0,
+                                 first / 16000.0)
+                    audio = audio[lo:hi]
+                else:
+                    # ponytail: fail-open — VAD misses quiet/short speech, and an
+                    # empty result surfaces to the user as "Ошибка транскрибации".
+                    # Transcribe the raw audio instead of throwing it away.
+                    logger.warning("VAD_NO_SPEECH_FALLTHROUGH | audio=%.1fs | transcribing unfiltered",
+                                   len(audio) / 16000.0)
                 self._vad.reset()
 
             # Route: chunk long audio to avoid ONNX crash

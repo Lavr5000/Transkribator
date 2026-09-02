@@ -1,8 +1,8 @@
-"""Transcription module with multi-backend support.
+"""Transcription module.
 
-Supports multiple speech recognition backends:
-- WhisperBackend: OpenAI Whisper (faster-whisper or openai-whisper)
-- SherpaBackend: Sherpa-ONNX with GigaAM models (optimized for Russian)
+One backend since 2.4.0: SherpaBackend — Sherpa-ONNX with GigaAM models,
+running locally. The registry in src/backends is still keyed by name, so a
+second engine can be added back without touching this module.
 """
 import gc
 import logging
@@ -13,6 +13,7 @@ from typing import Callable, Optional, Tuple
 import numpy as np
 
 from .crash_reporter import get_reporter
+from .event_log import log_event
 
 logger = logging.getLogger("transkribator")
 
@@ -32,8 +33,8 @@ class Transcriber:
 
     def __init__(
         self,
-        backend: str = "whisper",
-        model_size: str = "base",
+        backend: str = "sherpa",
+        model_size: str = "giga-am-v3-ru-punct",
         device: str = "auto",
         compute_type: str = "auto",
         language: str = "auto",
@@ -46,12 +47,13 @@ class Transcriber:
         min_speech_duration_ms: int = 500,
         # User dictionary
         user_dictionary: list = None,
+        legacy_prompt_removed: bool = True,
     ):
         """
         Initialize transcriber with specified backend.
 
         Args:
-            backend: Backend name (whisper, sherpa, podlodka-turbo)
+            backend: Backend name (sherpa)
             model_size: Model size/identifier
             device: Device to use (cpu, cuda, auto)
             compute_type: Computation type (float16, int8, auto)
@@ -79,6 +81,7 @@ class Transcriber:
 
         # User dictionary for custom corrections
         self.user_dictionary = user_dictionary or []
+        self.legacy_prompt_removed = legacy_prompt_removed
 
         # Fallback tracking
         self.last_used_fallback = False
@@ -129,6 +132,7 @@ class Transcriber:
             self.vad_threshold,
             self.min_silence_duration_ms,
             self.min_speech_duration_ms,
+            self.legacy_prompt_removed,
         )
 
     def _create_backend(self):
@@ -146,6 +150,7 @@ class Transcriber:
                 vad_threshold=self.vad_threshold,
                 min_silence_duration_ms=self.min_silence_duration_ms,
                 min_speech_duration_ms=self.min_speech_duration_ms,
+                legacy_prompt_removed=self.legacy_prompt_removed,
             )
             self._created_fingerprint = self._backend_fingerprint()
 
@@ -170,7 +175,7 @@ class Transcriber:
         reload the model.
 
         Args:
-            backend: New backend name (whisper, sherpa, podlodka-turbo)
+            backend: New backend name (sherpa)
             model_size: Optional new model size
 
         Returns:
@@ -273,18 +278,9 @@ class Transcriber:
                     self._create_backend()
                 text, backend_time = self._backend.transcribe(audio, sample_rate, cancel_event=self._cancel_event)
 
-                # Track if Groq fell back to Sherpa
                 self.last_used_fallback = getattr(self._backend, 'last_used_fallback', False)
-
-                # Groq's local fallback is Sherpa v3-punct: rebuild the processor
-                # so backend-aware config matches the text that was actually produced
-                if self.last_used_fallback and self.backend_name == "groq" and ENHANCED_PROCESSOR_AVAILABLE:
-                    if getattr(self.text_processor, "backend", None) != "sherpa":
-                        self.text_processor = self._make_text_processor(
-                            backend_name="sherpa",
-                            model_size="giga-am-v3-ru-punct",
-                        )
-                        logger.info("GROQ_FALLBACK_PROCESSOR_SWITCH | processor rebuilt for sherpa fallback")
+                self.last_fallback_reason = getattr(self._backend, 'last_fallback_reason', None)
+                self.last_prompt_sent = getattr(self._backend, 'last_prompt_sent', None)
 
             # Check cancellation after transcription
             if self._cancel_event.is_set():
@@ -296,10 +292,17 @@ class Transcriber:
                 text = self.text_processor.process(text)
 
             process_time = time.time() - start_time
+            words = len(text.split())
             logger.info("TRANSCRIBE_DONE | backend=%s | audio=%.1fs | elapsed=%.2fs (RTF=%.2f) | words=%d | chars=%d",
                          self.backend_name, audio_duration, process_time,
                          process_time / audio_duration if audio_duration > 0 else 0,
-                         len(text.split()), len(text))
+                         words, len(text))
+            if words == 0:
+                # quality_monitor (deleted in 2.4.0) watched empty results and
+                # alerted over Telegram, a sink excluded from the EXE that never
+                # fired in 5 months. The signal survives as a structured event
+                # so tasks/burnin_report.py can still count empty runs.
+                log_event("empty_result", audio_s=round(audio_duration, 2))
             return text, process_time
 
         except Exception as e:

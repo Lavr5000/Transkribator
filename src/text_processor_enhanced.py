@@ -1,5 +1,6 @@
 """Enhanced text post-processing with punctuation restoration for Sherpa-ONNX."""
 import logging
+import os
 import re
 from typing import Dict, List, Tuple, Optional
 
@@ -56,7 +57,7 @@ class EnhancedTextProcessor(TextProcessor):
             enable_phonetics: Whether to enable phonetic corrections (voiced/unvoiced)
             enable_morphology: Whether to enable morphological corrections (gender, case)
             enable_proper_nouns: Whether to enable proper noun capitalization
-            backend: Backend type for adaptive processing ("whisper", "sherpa", "podlodkaturbo")
+            backend: Backend type for adaptive processing ("sherpa")
             model_size: Model identifier; "-punct" models emit punctuation themselves,
                 so ML punctuation restoration is skipped for them
             user_dictionary: User-defined correction entries [{"wrong": str, "correct": str, "case_sensitive": bool}]
@@ -86,36 +87,22 @@ class EnhancedTextProcessor(TextProcessor):
         self._components_initialized = False
 
     def _configure_for_backend(self, enable_phonetics: bool, enable_morphology: bool, enable_proper_nouns: bool):
-        """Configure processing flags based on backend type.
+        """Configure processing flags from the model in use.
 
-        Different backends produce different output quality:
-        - Whisper: Has punctuation, capitalization (minimal processing needed)
-        - Sherpa/Podlodka: Raw lowercase text (full processing needed)
+        Sherpa CTC emits raw lowercase text and needs the full pipeline;
+        "-punct" models (e.g. giga-am-v3-ru-punct, the app default) emit
+        punctuation themselves — running the ~560M-param XLM-R restoration
+        model on top would double punctuation AND dominate hot-path latency.
 
         Args:
             enable_phonetics: Base preference for phonetic corrections
             enable_morphology: Base preference for morphological corrections
             enable_proper_nouns: Base preference for proper noun capitalization
         """
-        # Whisper-family models (incl. Podlodka fine-tune and Groq cloud Whisper)
-        # emit punctuation and capitalization themselves.
-        whisper_like = self.backend in ("whisper", "podlodkaturbo", "podlodka-turbo", "groq")
-        # Sherpa "-punct" models (e.g. giga-am-v3-ru-punct, the app default)
-        # also emit punctuation: running the ~560M-param XLM-R restoration
-        # model on top would double punctuation AND dominate hot-path latency.
         model_emits_punctuation = "-punct" in self.model_size
-
-        if whisper_like:
-            # Skip punctuation restoration to avoid double punctuation
-            # Skip advanced corrections (Whisper has fewer phonetic/morphological errors)
-            self.enable_punctuation = False
-            self.enable_phonetics = False
-            self.enable_morphology = False
-        else:
-            # Sherpa CTC without built-in punctuation: full pipeline
-            self.enable_punctuation = not model_emits_punctuation
-            self.enable_phonetics = enable_phonetics and PHONETICS_AVAILABLE
-            self.enable_morphology = enable_morphology and MORPHOLOGY_AVAILABLE
+        self.enable_punctuation = not model_emits_punctuation
+        self.enable_phonetics = enable_phonetics and PHONETICS_AVAILABLE
+        self.enable_morphology = enable_morphology and MORPHOLOGY_AVAILABLE
 
         # Proper nouns are useful for all backends
         self.enable_proper_nouns = enable_proper_nouns and PROPER_NOUNS_AVAILABLE
@@ -131,7 +118,7 @@ class EnhancedTextProcessor(TextProcessor):
 
     def _russian_corrections(self):
         """Load Russian language error corrections with Sherpa-specific fixes."""
-        # Common Whisper/Sherpa errors for Russian
+        # Common Sherpa recognition errors for Russian
         self.corrections = {
             # Sherpa-ONNX specific errors (from test results)
             "классок": "колосок",
@@ -599,7 +586,20 @@ class EnhancedTextProcessor(TextProcessor):
         if self.punctuation_model is None:
             try:
                 logger.info("PUNCTUATION_MODEL_LOADING")
-                self.punctuation_model = PunctuationModel()
+                # ponytail: offline-only load. On a slow link HuggingFace download
+                # hangs for minutes inside the hot path and the transcription
+                # times out. Cache hit = fast, cache miss = instant failure below.
+                prev = {k: os.environ.get(k) for k in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE")}
+                os.environ["HF_HUB_OFFLINE"] = "1"
+                os.environ["TRANSFORMERS_OFFLINE"] = "1"
+                try:
+                    self.punctuation_model = PunctuationModel()
+                finally:
+                    for k, v in prev.items():
+                        if v is None:
+                            os.environ.pop(k, None)
+                        else:
+                            os.environ[k] = v
                 logger.info("PUNCTUATION_MODEL_LOADED")
             except Exception as e:
                 logger.warning("PUNCTUATION_MODEL_LOAD_FAILED | %s", e)

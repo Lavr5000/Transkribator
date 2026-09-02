@@ -103,3 +103,6 @@ send_*.py
 # Server runtime data (may contain personal speech/transcripts)
 TranscriberServer/results/
 TranscriberServer/uploads/
+
+# Release build scratch (scripts/build_release.py)
+.venv-build/

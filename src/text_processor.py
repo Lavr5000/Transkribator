@@ -4,7 +4,7 @@ from typing import Dict, List, Tuple
 
 
 class TextProcessor:
-    """Improves transcribed text by fixing common Whisper errors."""
+    """Improves transcribed text by fixing common recognition errors."""
 
     def __init__(self, language: str = "ru", enable_corrections: bool = True):
         """
@@ -29,9 +29,9 @@ class TextProcessor:
 
     def _russian_corrections(self):
         """Load Russian language error corrections."""
-        # Common Whisper errors for Russian
+        # Common recognition errors for Russian
         self.corrections = {
-            # Phonetic substitutions (Whisper confuses similar sounds)
+            # Phonetic substitutions (the engine confuses similar sounds)
             "лыбки": "улыбки",
             "лыбкою": "улыбкою",
             "тулыбки": "улыбки",
@@ -92,7 +92,7 @@ class TextProcessor:
 
         # Pattern-based corrections (regex)
         self.pattern_corrections = [
-            # Fix "А" → "От" at start (common Whisper error)
+            # Fix "А" → "От" at start (common recognition error)
             (r'^А (\w+)', lambda m: f'От {m.group(1)}'),
 
             # Fix multiple spaces
@@ -149,7 +149,7 @@ class TextProcessor:
 
     def _fix_errors(self, text: str) -> str:
         """Fix common transcription errors."""
-        # Step 1: Fix repeated letters (common Whisper error)
+        # Step 1: Fix repeated letters (common recognition error)
         text = self._fix_repeated_letters(text)
 
         # Step 2: Apply corrections from LONGEST to SHORTEST (to avoid substring conflicts)
@@ -167,7 +167,7 @@ class TextProcessor:
         return text
 
     def _fix_repeated_letters(self, text: str) -> str:
-        """Fix repeated letters (Whisper artifact)."""
+        """Fix repeated letters (recognition artifact)."""
         # Use word boundaries to avoid affecting other words
         # Only fix exact matches, not substrings
 

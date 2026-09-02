@@ -3,10 +3,19 @@ import json
 import os
 import time
 import threading
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, fields, asdict
 from pathlib import Path
 from typing import Optional
+import logging
+
 import platformdirs
+
+logger = logging.getLogger("transkribator")
+
+# Bumped whenever stored config.json needs a migration (see Config.migrate).
+# 1 -> 2 (2.4.0): single backend, no cloud/remote/Telegram fields, devices
+# stored by host API + name instead of a PortAudio index.
+CONFIG_VERSION = 2
 
 
 @dataclass
@@ -20,23 +29,30 @@ class Config:
     user_dictionary: list = field(default_factory=list)  # [{"wrong": str, "correct": str, "case_sensitive": bool}]
 
     # Backend selection
-    backend: str = "sherpa"  # whisper, sherpa (sherpa is ~30% faster for Russian)
+    backend: str = "sherpa"  # the only engine since 2.4.0 — local Sherpa-ONNX
 
     # Model settings
-    model_size: str = "giga-am-v3-ru"         # For Sherpa: giga-am-v3-ru (default, shipped in repo + spec),
-                                              # giga-am-v3-ru-punct (with punctuation, downloaded on demand),
-                                              # giga-am-v2-ru, giga-am-ru
-                                              # For Whisper: tiny, base, small, medium, large
-                                              # For Podlodka: podlodka-turbo
+    model_size: str = "giga-am-v3-ru-punct"   # giga-am-v3-ru-punct (default, shipped in the release;
+                                              # ASR emits punctuation itself, so the 560M XLM-R restorer
+                                              # never loads — no network needed at runtime),
+                                              # giga-am-v3-ru, giga-am-v2-ru, giga-am-ru
     language: str = "ru"  # auto-detect or specific language code
     device: str = "auto"  # auto, cpu, cuda
     compute_type: str = "auto"  # auto, int8, float16, float32
     enable_post_processing: bool = True  # Enable text post-processing for better accuracy
 
+    # Schema version of the stored config.json (see Config.migrate)
+    config_version: int = CONFIG_VERSION
+
     # Audio settings
     sample_rate: int = 16000
     channels: int = 1
-    audio_device: int = -1  # -1 = system default, or specific device index
+    # Devices are stored by host API + name, not by PortAudio index: indexes
+    # move across reboots, USB re-plugs and driver updates. The legacy index
+    # from <= 2.3 configs is resolved once and written back as a name.
+    audio_device_name: str = ""      # "" = system default input
+    audio_hostapi: str = ""          # e.g. "windows wasapi", "mme"
+    audio_device_legacy_index: int = -1
     mic_boost: float = 1.0  # Software gain multiplier (DEPRECATED: Use WebRTC AGC instead)
                                 # Only used when webrtc_enabled=False
                                 # 1.0 = no boost, kept for fallback compatibility
@@ -67,9 +83,6 @@ class Config:
     auto_paste: bool = True  # Auto paste to focused window
     auto_enter: bool = False  # Press Enter after paste
 
-    # Remote processing settings
-    enable_remote_fallback: bool = False  # Enable remote server fallback (disabled by default for speed)
-
     # Paste method: "clipboard" (safe, uses Ctrl+Shift+V) or "type" (legacy, types characters)
     # "clipboard" is recommended - it's faster and doesn't crash terminal apps like Claude Code
     paste_method: str = "clipboard"  # clipboard | type
@@ -92,6 +105,17 @@ class Config:
     total_recordings: int = 0
     total_seconds_saved: float = 0.0
 
+    # v3 modernization — Stage 0 flags (see План модернизации v3, Этап 0)
+    research_mode: bool = False       # experiments only: hard-disables paste/clipboard
+    audio_archive: bool = False       # opt-in raw-audio retention corpus
+    audio_archive_dpapi: bool = True  # DPAPI encryption for the archive (opt-out checkbox)
+    legacy_prompt_removed: bool = True  # off = restore the leaked "Диктовка..." cloud prompt
+
+    # v3 modernization — Stage 1 flag (see План модернизации v3, Этап 1 / D3)
+    # off = MME @ 16 kHz (v2 behaviour); on = WASAPI @ 48 kHz + FIR resample to
+    # 16 kHz at stop(), with automatic visible MME fallback if the open fails.
+    capture_wasapi: bool = False
+
     def __post_init__(self) -> None:
         # Non-field state guarding rate-limited disk writes.
         # Initialized once at construction, before any thread can call save().
@@ -111,6 +135,66 @@ class Config:
         """Get the configuration file path."""
         return cls.get_config_dir() / "config.json"
 
+    # Fields dropped in 2.4.0 together with the code that read them. Listed
+    # explicitly so the migration log says what went, instead of silently
+    # eating everything unknown.
+    _REMOVED_FIELDS = (
+        "enable_remote_fallback",
+        "remote_server_url", "remote_url", "remote_timeout", "remote_api_key",
+        "telegram_api_id", "telegram_api_hash", "telegram_chat_id",
+        "telegram_bot_token", "telegram_enabled",
+        "groq_api_key", "groq_model",
+    )
+
+    @classmethod
+    def migrate(cls, data: dict) -> dict:
+        """Bring a stored config dict up to CONFIG_VERSION.
+
+        PURE SCHEMA WORK: no PortAudio, no device enumeration, nothing that
+        needs hardware or optional imports — this runs on every start, in
+        headless CI and in tests where `sounddevice` is not installed. The
+        device index is only RENAMED here; resolving it to a real device is
+        the audio layer's job, at stream open.
+        """
+        old_version = int(data.get("config_version", 1) or 1)
+        changed = []
+
+        if data.get("backend") not in BACKENDS:
+            if "backend" in data:
+                changed.append(f"backend={data['backend']}->sherpa")
+            data["backend"] = "sherpa"
+            # A cloud model id cannot survive the backend change.
+            if data.get("model_size") not in SHERPA_MODELS:
+                changed.append(f"model_size={data.get('model_size')}->giga-am-v3-ru-punct")
+                data["model_size"] = "giga-am-v3-ru-punct"
+        elif data.get("model_size") not in SHERPA_MODELS:
+            changed.append(f"model_size={data.get('model_size')}->giga-am-v3-ru-punct")
+            data["model_size"] = "giga-am-v3-ru-punct"
+
+        if "audio_device" in data:
+            legacy = data.pop("audio_device")
+            try:
+                legacy = int(legacy)
+            except (TypeError, ValueError):
+                legacy = -1
+            data.setdefault("audio_device_legacy_index", legacy)
+            data.setdefault("audio_device_name", "")
+            data.setdefault("audio_hostapi", "")
+            changed.append(f"audio_device={legacy}->legacy_index")
+
+        known = {f.name for f in fields(cls)}
+        for key in list(data):
+            if key in known:
+                continue
+            changed.append(f"-{key}" if key in cls._REMOVED_FIELDS else f"-{key}(unknown)")
+            data.pop(key)
+
+        data["config_version"] = CONFIG_VERSION
+        if changed or old_version != CONFIG_VERSION:
+            logger.info("CONFIG_MIGRATED old=%s new=%s | %s",
+                        old_version, CONFIG_VERSION, ", ".join(changed) or "no field changes")
+        return data
+
     @classmethod
     def load(cls) -> "Config":
         """Load configuration from file."""
@@ -119,9 +203,13 @@ class Config:
             try:
                 with open(config_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                return cls(**data)
-            except (json.JSONDecodeError, TypeError):
-                pass
+                # Unknown keys used to raise TypeError here and silently reset
+                # the whole config — hotkey, mouse button and lifetime counters
+                # included. Migration drops them by name instead.
+                return cls(**cls.migrate(data))
+            except (json.JSONDecodeError, TypeError, AttributeError) as e:
+                logger.error("CONFIG_LOAD_FAILED | %s: %s — falling back to defaults",
+                             type(e).__name__, e)
         return cls()
 
     def save(self) -> None:
@@ -178,22 +266,9 @@ class Config:
         self.save()
 
 
-# Available backends
+# The only backend since 2.4.0 (see src/backends/__init__.py)
 BACKENDS = {
-    "whisper": "Whisper (OpenAI)",
     "sherpa": "Sherpa-ONNX (GigaAM Russian)",
-    "podlodka-turbo": "Whisper-Podlodka-Turbo (Russian fine-tuned)",
-    "groq": "Groq Whisper (Cloud, fast)",
-}
-
-# Available Whisper models
-WHISPER_MODELS = {
-    "tiny": "Tiny (~1GB VRAM, fastest)",
-    "base": "Base (~1GB VRAM, fast)",
-    "small": "Small (~2GB VRAM, balanced)",
-    "medium": "Medium (~5GB VRAM, accurate)",
-    "large": "Large (~10GB VRAM, most accurate)",
-    "large-v3": "Large V3 (~10GB VRAM, latest)"
 }
 
 # Available Sherpa-ONNX models
@@ -202,17 +277,6 @@ SHERPA_MODELS = {
     "giga-am-v3-ru": "GigaAM v3 Russian (2025)",
     "giga-am-v2-ru": "GigaAM v2 Russian (2025)",
     "giga-am-ru": "GigaAM Russian (2024)",
-}
-
-# Available Podlodka-Turbo models
-PODLODKA_MODELS = {
-    "podlodka-turbo": "Podlodka-Turbo (Russian fine-tuned, recommended)",
-}
-
-# Available Groq cloud models
-GROQ_MODELS = {
-    "whisper-large-v3-turbo": "Whisper Large V3 Turbo (fast, recommended)",
-    "whisper-large-v3": "Whisper Large V3 (most accurate)",
 }
 
 # Supported languages
@@ -268,7 +332,7 @@ PASTE_METHODS = {
 QUALITY_PROFILES = {
     "fast": {
         "backend": "sherpa",
-        "model_size": "giga-am-v3-ru",
+        "model_size": "giga-am-v3-ru-punct",
         "vad_enabled": False,
         "vad_threshold": 0.5,
         "min_silence_duration_ms": 800,
@@ -277,7 +341,7 @@ QUALITY_PROFILES = {
     },
     "balanced": {
         "backend": "sherpa",
-        "model_size": "giga-am-v3-ru",
+        "model_size": "giga-am-v3-ru-punct",
         "vad_enabled": True,
         "vad_threshold": 0.5,
         "min_silence_duration_ms": 800,
@@ -286,7 +350,7 @@ QUALITY_PROFILES = {
     },
     "quality": {
         "backend": "sherpa",
-        "model_size": "giga-am-v3-ru",
+        "model_size": "giga-am-v3-ru-punct",
         "vad_enabled": True,
         "vad_threshold": 0.3,
         "min_silence_duration_ms": 500,
@@ -297,22 +361,8 @@ QUALITY_PROFILES = {
 
 # Model metadata for UI display (RAM usage, RTF, description)
 MODEL_METADATA = {
-    # Whisper models
-    "tiny": {"ram_mb": 1000, "rtf": 0.3, "description": "Макс. скорость"},
-    "base": {"ram_mb": 1000, "rtf": 0.5, "description": "Быстрый"},
-    "small": {"ram_mb": 2000, "rtf": 1.0, "description": "Баланс"},
-    "medium": {"ram_mb": 5000, "rtf": 2.0, "description": "Точный"},
-    "large": {"ram_mb": 10000, "rtf": 3.0, "description": "Очень точный"},
-    "large-v3": {"ram_mb": 10000, "rtf": 3.5, "description": "Последний (v3)"},
-    "large-v3-turbo": {"ram_mb": 10000, "rtf": 3.0, "description": "Макс. точность"},
-    # Sherpa models
     "giga-am-v3-ru-punct": {"ram_mb": 250, "rtf": 0.05, "description": "Русский + пунктуация (v3, 2025-12)"},
     "giga-am-v3-ru": {"ram_mb": 220, "rtf": 0.04, "description": "Русский (2025, CTC v3)"},
     "giga-am-v2-ru": {"ram_mb": 140, "rtf": 0.09, "description": "Русский (2025)"},
     "giga-am-ru": {"ram_mb": 140, "rtf": 0.1, "description": "Русский (2024)"},
-    # Podlodka model
-    "podlodka-turbo": {"ram_mb": 1000, "rtf": 0.4, "description": "Ru fine-tuned"},
-    # Groq cloud models
-    "whisper-large-v3-turbo": {"ram_mb": 0, "rtf": 0.05, "description": "Groq Cloud (быстрый)"},
-    "whisper-large-v3": {"ram_mb": 0, "rtf": 0.1, "description": "Groq Cloud (точный)"},
 }

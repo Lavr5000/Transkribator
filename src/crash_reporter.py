@@ -132,20 +132,6 @@ class CrashReporter:
         except Exception:
             pass
 
-    def _notify_telegram(self, report):
-        """Queue crash report for Telegram (disk only — NO network in excepthook).
-
-        A hung network call here would block crash-exit and the watchdog
-        restart. The queued message is sent on next app start (send_unsent).
-        """
-        try:
-            from .notifier import TelegramNotifier
-            notifier = TelegramNotifier(crash_dir=self.crash_dir)
-            message = notifier.format_crash_report(report)
-            notifier.queue_for_next_start(message)
-        except Exception:
-            pass  # notification must never crash the app
-
     def _read_log_tail(self, n=20, log_path=None):
         """Read last n lines from debug.log."""
         path = log_path or self.log_path

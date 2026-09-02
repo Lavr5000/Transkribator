@@ -5,6 +5,7 @@ import time
 import logging
 import logging.handlers
 import threading
+import uuid
 from typing import Optional
 
 try:
@@ -26,12 +27,12 @@ from .config import Config, MODEL_METADATA
 from .audio_recorder import AudioRecorder
 from .transcriber import Transcriber, get_available_backends
 from .crash_reporter import get_reporter
-from .notifier import TelegramNotifier
-from .quality_monitor import QualityMonitor
+from . import hotkeys
 from .hotkeys import HotkeyManager, type_text, safe_paste_text, paste_from_clipboard
 from .history_manager import HistoryManager
+from . import versions
+from .audio_archive import AudioArchive
 from .mouse_handler import MouseButtonHandler
-from .remote_client import RemoteTranscriptionClient
 from .widgets import (
     COLORS, COLORS_HEX, COMPACT_HEIGHT, COMPACT_WIDTH,
     RecordButton, CopyButton, SettingsButton, CloseButton, CancelButton,
@@ -85,102 +86,35 @@ class TranscriptionThread(QThread):
 
 
 class HybridTranscriptionThread(QThread):
-    """Thread for hybrid transcription: LOCAL first, then remote fallback.
+    """Runs one local transcription off the Qt thread.
 
-    Strategy:
-    1. Try local transcription (Sherpa) first with timeout
-    2. If local fails or takes >20 seconds, try remote
-    3. If remote also fails, return error
+    Named "hybrid" historically: it used to fall back to a cloud engine and
+    to a remote server. Both were removed in 2.4.0 — the app has been
+    local-only since 2026-08-24 and made zero network calls after that — so
+    the only path left is Sherpa on this machine.
     """
     transcription_done = pyqtSignal(str, float, bool)  # text, duration, is_remote
     transcription_error = pyqtSignal(str)
 
-    def __init__(self, remote_client, transcriber, audio, sample_rate: int, enable_remote: bool = False):
+    def __init__(self, transcriber, audio, sample_rate: int):
         super().__init__()
-        self.remote_client = remote_client
         self.transcriber = transcriber
         self.audio = audio
         self.sample_rate = sample_rate
         self._is_cancelled = False
-        self._enable_remote = enable_remote  # Allow disabling remote fallback
-        # Dynamic timeout: min 30s, or 40% of audio duration (for chunked processing)
-        audio_duration_sec = len(audio) / sample_rate
-        self._local_timeout = max(30.0, audio_duration_sec * 0.4)
 
     def run(self):
         try:
             if self._is_cancelled:
                 return
-
-            # === STEP 1: Try LOCAL transcription first ===
-            local_start = time.time()
-            try:
-                # Use threading.Timer to implement timeout
-                import concurrent.futures
-
-                # NOT a context manager: `with` calls shutdown(wait=True) on
-                # timeout, blocking this thread until the local transcription
-                # finishes anyway — the remote fallback would never be faster.
-                executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-                try:
-                    future = executor.submit(
-                        self.transcriber.transcribe,
-                        self.audio,
-                        self.sample_rate
-                    )
-
-                    try:
-                        # Wait for local transcription with timeout
-                        text, duration = future.result(timeout=self._local_timeout)
-
-                        if not self._is_cancelled and text:
-                            # Local transcription successful!
-                            self.transcription_done.emit(text, duration, False)  # is_remote=False
-                            return
-
-                    except concurrent.futures.TimeoutError:
-                        # Local transcription took too long - cancel and try remote
-                        future.cancel()
-                        self.transcriber.cancel()
-                        logger.debug("Local transcription timeout (%.1fs)", self._local_timeout)
-                        raise Exception("Local transcription timeout")
-                finally:
-                    executor.shutdown(wait=False)
-
-            except Exception as local_error:
-                # Local transcription failed - try remote fallback
-                if not self._is_cancelled:
-                    logger.debug("Local transcription failed: %s", local_error)
-                    logger.debug("Trying remote fallback...")
-
-            # === STEP 2: Try REMOTE transcription as fallback (if enabled) ===
-            if not self._is_cancelled and self._enable_remote:
-                try:
-                    remote_start = time.time()
-                    text = self.remote_client.transcribe_remote(
-                        self.audio,
-                        self.sample_rate
-                    )
-                    duration = time.time() - remote_start
-
-                    if not self._is_cancelled and text:
-                        # Remote transcription successful (fallback)
-                        self.transcription_done.emit(text, duration, True)  # is_remote=True
-                        return
-                    else:
-                        raise Exception("Remote transcription returned empty text")
-
-                except Exception as remote_error:
-                    # Both local and remote failed
-                    if not self._is_cancelled:
-                        logger.debug("Remote transcription also failed: %s", remote_error)
-                        self.transcription_error.emit(f"Local and remote failed: {remote_error}")
-
-            # === Remote fallback disabled or not available ===
-            elif not self._is_cancelled:
-                logger.debug("Local transcription failed, remote fallback disabled")
-                self.transcription_error.emit("Local transcription failed. Enable remote fallback in settings if needed.")
-
+            text, duration = self.transcriber.transcribe(self.audio, self.sample_rate)
+            if self._is_cancelled:
+                return
+            if text:
+                self.transcription_done.emit(text, duration, False)
+            else:
+                # transcriber.transcribe() already logged the empty_result event.
+                self.transcription_error.emit("Пустой результат распознавания")
         except Exception as e:
             if not self._is_cancelled:
                 logger.debug("HybridTranscriptionThread error: %s", e)
@@ -194,24 +128,40 @@ class MainWindow(QMainWindow):
     status_update = pyqtSignal(str)
     audio_level_update = pyqtSignal(float)
     _request_toggle = pyqtSignal()  # Thread-safe signal for hotkey/mouse callbacks
+    # Audio device open/close runs in worker threads (WASAPI can stall for
+    # minutes and would freeze the GUI thread); results come back via signals
+    _start_finished = pyqtSignal(str)  # 'started' | 'warming' | 'error'
+    _stop_finished = pyqtSignal(object)  # np.ndarray or None
+    _recovery_finished = pyqtSignal(bool)  # WASAPI recovery probe result
 
     def __init__(self):
         super().__init__()
 
         self.config = Config.load()
+        # Этап 0 (r1-30): research_mode hard-disables paste/clipboard at the
+        # hotkeys adapter layer, regardless of call site.
+        hotkeys.RESEARCH_MODE_BLOCK = self.config.research_mode
         self.recorder = AudioRecorder(
             sample_rate=self.config.sample_rate,
             channels=self.config.channels,
             on_level_update=self._on_vad_level_update,
-            device=self.config.audio_device if self.config.audio_device != -1 else None,
+            device=self.config.audio_device_legacy_index,
+            device_name=self.config.audio_device_name,
+            device_hostapi=self.config.audio_hostapi,
+            on_device_resolved=self._on_device_resolved,
             mic_boost=self.config.mic_boost,
             webrtc_enabled=self.config.webrtc_enabled,
             noise_suppression_level=self.config.noise_suppression_level,
+            capture_wasapi=self.config.capture_wasapi,
         )
         # Configure auto-stop
         self.recorder.auto_stop_enabled = self.config.auto_stop_enabled
         self.recorder.auto_stop_silence_sec = self.config.auto_stop_silence_sec
         self.recorder.on_auto_stop = self._on_auto_stop
+        # Warm up the persistent mic stream in the background: on a degraded
+        # audio stack the WASAPI open can take 25+ seconds — pay it once at
+        # startup, overlapping model load, instead of on every recording
+        self.recorder.ensure_stream_async()
 
         def _make_transcriber(backend, model_size):
             return Transcriber(
@@ -229,6 +179,7 @@ class MainWindow(QMainWindow):
                 min_speech_duration_ms=self.config.min_speech_duration_ms,
                 # User dictionary
                 user_dictionary=self.config.user_dictionary,
+                legacy_prompt_removed=self.config.legacy_prompt_removed,
             )
 
         try:
@@ -246,10 +197,7 @@ class MainWindow(QMainWindow):
 
         self.hotkey_manager = HotkeyManager(on_hotkey=self._on_hotkey)
         self.history_manager = HistoryManager(max_entries=50)
-        self._quality_monitor = QualityMonitor(TelegramNotifier())
-
-        # Initialize remote transcription client
-        self.remote_client = RemoteTranscriptionClient()
+        self.audio_archive = AudioArchive(dpapi_enabled=self.config.audio_archive_dpapi)
 
         # Initialize mouse button handler
         self.mouse_handler = MouseButtonHandler(
@@ -261,6 +209,7 @@ class MainWindow(QMainWindow):
         self._rec_start = 0.0
         self._rec_duration = 0.0  # Длительность записи
         self._transcription_start = 0.0  # Время начала транскрибации
+        self._trigger_id = None  # join key with event-log records (Этап 0, r2-8)
         self._drag_pos = None
         self._settings = None
         self._recording = False
@@ -288,9 +237,22 @@ class MainWindow(QMainWindow):
         # Preload model immediately (in background thread) to eliminate cold start
         QTimer.singleShot(100, self._load_model)
 
+        # A2: get off a WASAPI→MME fallback instead of staying on MME until the
+        # owner notices (2026-09-02: 7 h 40 min / 30 recordings on MME 16 kHz).
+        # The timer is armed only when a fallback is actually in effect; the
+        # first check waits out the startup warm-up.
+        self._recovery_step = 0
+        self._recovery_running = False
+        self._recovery_timer = QTimer(self)
+        self._recovery_timer.setSingleShot(True)
+        self._recovery_timer.timeout.connect(self._run_recovery_probe)
+        QTimer.singleShot(30_000, self._arm_recovery_if_needed)
+        # A missing configured microphone must be visible, not silent.
+        QTimer.singleShot(30_000, self._show_device_warning)
+
         # Show onboarding tooltip on first run
         if self.config.first_run:
-            QTimer.singleShot(500, self._show_onboarding)
+            QTimer.singleShot(500, self.show_first_run_dialog)
 
     def _setup_ui(self):
         self.setWindowTitle("ГолосТекст")
@@ -509,11 +471,9 @@ class MainWindow(QMainWindow):
         self._transcription_start = time.time()
         self._cleanup_thread()
         self._thread = HybridTranscriptionThread(
-            self.remote_client,
             self.transcriber,
             self._last_audio,
             self.config.sample_rate,
-            enable_remote=getattr(self.config, 'enable_remote_fallback', False)
         )
         self._thread.transcription_done.connect(self._done)
         self._thread.transcription_error.connect(self._error)
@@ -534,10 +494,13 @@ class MainWindow(QMainWindow):
         main_pos = self.pos()
         popup_height = self._text_popup.height()
 
-        # Проверяем что popup не уйдет за верх экрана
-        screen_geometry = QApplication.screenAt(main_pos).geometry()
+        # Проверяем что popup не уйдет за верх экрана.
+        # screenAt() возвращает None, когда окно оказалось за краем экрана
+        # (79 % всех падений 26.03–20.08); primaryScreen() тоже None в сеансе
+        # без экранов (RDP/headless) — тогда прижим к экрану просто пропускаем.
+        screen = QApplication.screenAt(main_pos) or QApplication.primaryScreen()
         popup_y = main_pos.y() - popup_height - 10
-        if popup_y < screen_geometry.top() + 50:
+        if screen is not None and popup_y < screen.geometry().top() + 50:
             # Если не помещается сверху, показываем снизу
             popup_y = main_pos.y() + self.height() + 10
 
@@ -555,18 +518,29 @@ class MainWindow(QMainWindow):
         except RuntimeError:
             pass
 
-    def _show_onboarding(self):
-        """Show first-run onboarding tooltip."""
-        hotkey = self.config.hotkey.replace("+", "+").upper()
-        tip = f"Нажмите {hotkey} или кнопку микрофона для записи.\nНастройки — при наведении справа."
-        self._text_popup.set_header("Добро пожаловать!")
-        self._show_text_popup(tip)
-        self._text_popup._text_edit.setReadOnly(True)
-        self._text_popup._accept_btn.hide()
-        self._text_popup._copy_btn.hide()
-        self._text_popup.show_with_timeout(8000)
-        self.config.first_run = False
-        self.config.save()
+    def show_first_run_dialog(self):
+        """Pick a microphone and prove it works (first run, or from Settings).
+
+        Replaces the old onboarding tooltip, which named the hotkey and left
+        the user no way to find out whether the default input device was even
+        the right one — the whole "self-setup on a stranger's Windows".
+        """
+        if self._recording or self._processing:
+            self.status_update.emit("Дождитесь окончания записи")
+            return
+        try:
+            from .first_run_dialog import FirstRunDialog
+
+            def _transcribe(audio):
+                text, _elapsed = self.transcriber.transcribe(audio, self.config.sample_rate)
+                return text
+
+            dlg = FirstRunDialog(self.config, self.recorder, _transcribe, parent=self)
+            dlg.exec()
+        except Exception as e:
+            logger.error("FIRST_RUN_DIALOG_FAILED | %s", e, exc_info=True)
+            QMessageBox.information(self, "Ошибка",
+                                    f"Не удалось открыть проверку микрофона:\n{e}")
 
     _NOTIFY_WAV = r"C:\Windows\Media\Windows Notify System Generic.wav"
 
@@ -580,12 +554,93 @@ class MainWindow(QMainWindow):
             winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT
         )
 
+    def _show_device_warning(self):
+        """Surface a stale/absent configured microphone in the status line."""
+        warning = getattr(self.recorder, "device_warning", None)
+        if warning and not self._recording and not self._processing:
+            self.status_update.emit(warning)
+
+    def _on_device_resolved(self, name: str, hostapi: str):
+        """A legacy PortAudio index was resolved once — store it as a name."""
+        self.config.audio_device_name = name
+        self.config.audio_hostapi = hostapi
+        self.config.audio_device_legacy_index = -1
+        self.config.save()
+
+    # ------------------------------------------------------------------ #
+    # A2: WASAPI recovery after an MME fallback                           #
+    # ------------------------------------------------------------------ #
+
+    RECOVERY_BACKOFF_MIN = (10, 20, 40, 60)  # capped at 60 min
+
+    @classmethod
+    def _recovery_interval_ms(cls, step: int) -> int:
+        idx = min(max(step, 0), len(cls.RECOVERY_BACKOFF_MIN) - 1)
+        return cls.RECOVERY_BACKOFF_MIN[idx] * 60_000
+
+    def _arm_recovery_if_needed(self):
+        """Start (or leave running) the recovery timer iff a fallback is live."""
+        if self._shutting_down:
+            return
+        if not getattr(self.recorder, "capture_fallback_reason", None):
+            return
+        if self._recovery_timer.isActive() or self._recovery_running:
+            return
+        delay = self._recovery_interval_ms(self._recovery_step)
+        logger.info("RECOVER_ARMED | in %d min | reason=%s",
+                    delay // 60_000, self.recorder.capture_fallback_reason)
+        self._recovery_timer.start(delay)
+
+    def _run_recovery_probe(self):
+        """Timer fired: probe WASAPI in a worker thread, never on the Qt thread."""
+        if self._shutting_down or self._recovery_running:
+            return
+        if not self.recorder.capture_fallback_reason:
+            return
+        if self._recording or self._processing:
+            # Do not touch the device around a dictation — retry the same step.
+            self._recovery_timer.start(self._recovery_interval_ms(self._recovery_step))
+            return
+        deficit = self.recorder.recovery_idle_deficit_s()
+        if deficit > 0:
+            # Still inside the idle grace — waiting is not a failed attempt,
+            # so the backoff must not advance.
+            self._recovery_timer.start(int(deficit * 1000) + 1000)
+            return
+
+        self._recovery_running = True
+
+        def _worker():
+            ok = False
+            try:
+                ok = self.recorder.try_recover_wasapi()
+            except Exception as e:
+                logger.error("RECOVER_ERROR | %s: %s", type(e).__name__, e)
+            finally:
+                self._recovery_finished.emit(bool(ok))
+
+        threading.Thread(target=_worker, daemon=True, name="audio-recover").start()
+
+    def _on_recovery_finished(self, ok: bool):
+        """Runs in the Qt thread: reset the backoff on success, advance on failure."""
+        self._recovery_running = False
+        if ok:
+            self._recovery_step = 0
+            logger.info("RECOVER_OK | back on WASAPI")
+            return
+        self._recovery_step = min(self._recovery_step + 1,
+                                  len(self.RECOVERY_BACKOFF_MIN) - 1)
+        self._arm_recovery_if_needed()
+
     def _connect_signals(self):
         self.status_update.connect(self._set_status)
         self.audio_level_update.connect(self._set_level)
         # Connect toggle signal for thread-safe hotkey/mouse callbacks
         # This ensures _toggle_recording runs in the main Qt thread
         self._request_toggle.connect(self._toggle_recording, Qt.ConnectionType.QueuedConnection)
+        self._start_finished.connect(self._on_start_finished)
+        self._stop_finished.connect(self._on_stop_finished)
+        self._recovery_finished.connect(self._on_recovery_finished)
 
     def _load_model(self):
         def _load_with_status():
@@ -716,10 +771,33 @@ class MainWindow(QMainWindow):
         if self.vad_level_bar:
             self.vad_level_bar.setValue(0)
 
-        self._play_sound()  # Play BEFORE opening audio stream to avoid device conflict
-        if self.recorder.start():
+        self.status_label.setText("Запуск...")
+        self.status_label.show()
+
+        # PlaySound can stall when the audio stack degrades — off the GUI
+        # thread. recorder.start() is non-blocking (persistent stream), the
+        # SLOW_AUDIO_START warning is a regression signal if it ever fires.
+        def _worker():
+            t0 = time.time()
+            self._play_sound()
+            sound_elapsed = time.time() - t0
+            result = self.recorder.start()
+            total = time.time() - t0
+            if total > 1.0:
+                logger.warning("SLOW_AUDIO_START | play_sound=%.1fs total=%.1fs", sound_elapsed, total)
+            self._start_finished.emit(result)
+
+        threading.Thread(target=_worker, daemon=True, name="audio-start").start()
+
+    def _on_start_finished(self, result: str):
+        """Runs in the main Qt thread after recorder.start() returned."""
+        if self._shutting_down:
+            self._starting = False
+            return
+        if result == "started":
             self._recording = True
             self._rec_start = time.time()
+            self._trigger_id = uuid.uuid4().hex[:12]
             self.hotkey_label.hide()
             self.status_label.setText("Слушаю")
             self.status_label.show()  # Показываем статус при записи
@@ -736,9 +814,19 @@ class MainWindow(QMainWindow):
 
             self._starting = False
             logger.debug("_start() SUCCESS: recording started")
+        elif result == "warming":
+            self._starting = False
+            self.status_label.setText("Микрофон прогревается — повторите")
+            self.status_label.show()
+            logger.debug("_start() WARMING: stream not ready yet")
         else:
             self._starting = False
-            logger.debug("_start() FAILED: recorder.start() returned False")
+            self.status_label.setText("Ошибка микрофона")
+            if not self._hover:
+                self.status_label.hide()
+            logger.debug("_start() FAILED: recorder.start() returned %s", result)
+        # A late re-open may have landed on MME — arm the recovery timer then too.
+        self._arm_recovery_if_needed()
 
     def _stop(self):
         logger.debug("_stop() called, _recording=%s, _processing=%s", self._recording, self._processing)
@@ -750,13 +838,39 @@ class MainWindow(QMainWindow):
         # Сохраняем время записи
         self._rec_duration = time.time() - self._rec_start
 
-        audio = self.recorder.stop()
+        self.status_label.setText("Остановка...")
+        self.status_label.show()
+
+        # Device close (WASAPI) can stall — off the GUI thread, same as start
+        def _worker():
+            t0 = time.time()
+            audio = self.recorder.stop()
+            if time.time() - t0 > 1.0:
+                logger.warning("SLOW_AUDIO_STOP | %.1fs", time.time() - t0)
+            self._stop_finished.emit(audio)
+
+        threading.Thread(target=_worker, daemon=True, name="audio-stop").start()
+
+    def _on_stop_finished(self, audio):
+        """Runs in the main Qt thread after the audio device closed."""
+        if self._shutting_down:
+            return
         self._last_audio = audio  # Cache for retry
         QTimer.singleShot(200, self._play_sound)  # 200ms for WASAPI to fully release device
 
+        # Opt-in raw-audio corpus (Этап 0, default off). Runs off the GUI
+        # thread — archive I/O must never add to key-release→paste latency.
+        if self.config.audio_archive and audio is not None and len(audio) > 0:
+            threading.Thread(
+                target=lambda: self.audio_archive.save(audio, self.config.sample_rate),
+                daemon=True, name="audio-archive-save",
+            ).start()
+
         # Check audio quality and prepare warning header
         self._audio_quality_warning = ""
-        if self.recorder.clipping_detected:
+        if self.recorder.capture_degraded:
+            self._audio_quality_warning = "⚠ Микрофон прервался — запись может быть неполной"
+        elif self.recorder.clipping_detected:
             self._audio_quality_warning = "⚠ Обнаружено искажение (перегрузка)"
         elif self.recorder.low_signal:
             self._audio_quality_warning = "⚠ Слабый сигнал микрофона"
@@ -787,13 +901,10 @@ class MainWindow(QMainWindow):
         # Cleanup previous thread if exists
         self._cleanup_thread()
 
-        # Use hybrid transcription (LOCAL first, then remote fallback if enabled)
         self._thread = HybridTranscriptionThread(
-            self.remote_client,
             self.transcriber,
             audio,
             self.config.sample_rate,
-            enable_remote=getattr(self.config, 'enable_remote_fallback', False)
         )
         self._thread.transcription_done.connect(self._done)
         self._thread.transcription_error.connect(self._error)
@@ -818,8 +929,9 @@ class MainWindow(QMainWindow):
         self._processing = False
         self._rec_timer.stop()
 
-        # Останавливаем рекордер
-        self.recorder.stop()
+        # Останавливаем рекордер (WASAPI close может виснуть — не в GUI-потоке;
+        # AudioRecorder._lock сериализует с последующим start)
+        threading.Thread(target=self.recorder.stop, daemon=True, name="audio-cancel").start()
 
         # Сбрасываем UI
         self.timer_label.hide()
@@ -871,23 +983,18 @@ class MainWindow(QMainWindow):
         self.timer_label.setText(f"{self._rec_duration:.1f}→{transcription_time:.1f}с")
         self.timer_label.show()
 
-        # Show mode indicator (local/remote)
-        logger.debug("Transcription time: %.1fs, is_remote=%s", transcription_time, is_remote)
+        logger.debug("Transcription time: %.1fs", transcription_time)
 
         try:
-            if is_remote:  # Remote transcription successful
-                self.mode_label.setText("🌐")
-                self.mode_label.setToolTip("Удаленная транскрибация")
-                logger.debug("Mode: REMOTE (is_remote=True)")
-            elif getattr(self.transcriber, 'last_used_fallback', False):
-                # Groq backend fell back to Sherpa
-                self.mode_label.setText("⚡")
-                self.mode_label.setToolTip("Sherpa (Groq fallback)")
-                logger.debug("Mode: FALLBACK (Groq→Sherpa)")
-            else:  # Local transcription
-                self.mode_label.setText("🏠")
-                self.mode_label.setToolTip("Локальная транскрибация")
-                logger.debug("Mode: LOCAL (is_remote=False)")
+            self.mode_label.setText("🏠")
+            self.mode_label.setToolTip("Локальная транскрибация")
+            # Этап 1 (D3): откат WASAPI→MME должен быть виден в UI, а не только
+            # в истории. Тултип дополняется, иконка режима не подменяется.
+            if self.config.capture_wasapi and self.recorder.capture_rate == self.config.sample_rate:
+                self.mode_label.setToolTip(
+                    f"{self.mode_label.toolTip()}\nМикрофон: откат на MME 16 кГц "
+                    f"({self.recorder.capture_fallback_reason or 'причина не записана'})"
+                )
             self.mode_label.show()
 
             logger.debug("Mode label shown: %s", self.mode_label.text())
@@ -905,24 +1012,52 @@ class MainWindow(QMainWindow):
             self._settings._update_history_display()
 
         self.config.update_stats(len(text.split()), self._rec_duration)
-        self.history_manager.add_entry(text, duration, self.config.backend, self.config.model_size)
-        self._quality_monitor.record_result(
-            text_len=len(text),
-            audio_duration=self._rec_duration,
-            backend=self.config.backend,
-            model=self.config.model_size,
+
+        # Схема истории v2 (Этап 0) — собираем поля, известные к моменту
+        # завершения транскрибации; audio_duration_s/уровни идут от
+        # recorder'а (тот же массив, что был передан на транскрибацию).
+        quality_flags = []
+        if self.recorder.clipping_detected:
+            quality_flags.append("clipping")
+        if self.recorder.low_signal:
+            quality_flags.append("low_signal")
+        if self.recorder.capture_degraded:
+            quality_flags.append("capture_degraded")
+        # Этап 1 (D3): откат WASAPI→MME должен быть виден, а не молчаливым.
+        if self.config.capture_wasapi and self.recorder.capture_rate == self.config.sample_rate:
+            quality_flags.append("capture_fallback")
+        audio_duration_s = (
+            self.recorder.get_duration(self._last_audio) if self._last_audio is not None else None
+        )
+        self.history_manager.add_entry(
+            text, duration, self.config.backend, self.config.model_size,
+            audio_duration_s=audio_duration_s,
+            rms_dbfs=self.recorder.last_rms_dbfs,
+            peak_dbfs=self.recorder.last_peak_dbfs,
+            flags=quality_flags,
+            dropped_frames=self.recorder.dropped_frames,
+            used_fallback=getattr(self.transcriber, "last_used_fallback", False),
+            fallback_reason=getattr(self.transcriber, "last_fallback_reason", None),
+            device_api=self.recorder.device_api,
+            prompt_version=versions.prompt_version(getattr(self.transcriber, "last_prompt_sent", None)),
+            dictionary_version=versions.dictionary_version(self.config.user_dictionary),
+            trigger_id=self._trigger_id,
         )
 
-        # Авто-копирование в буфер обмена
-        if self.config.auto_copy and CLIPBOARD_AVAILABLE:
-            try:
-                pyperclip.copy(text)
-            except Exception:
-                pass
+        # research_mode (Этап 0, r1-30): experiments must never paste or
+        # copy — the adapters below refuse anyway, but the flow is skipped
+        # here too so a research run produces no visible side effect at all.
+        if not self.config.research_mode:
+            # Авто-копирование в буфер обмена
+            if self.config.auto_copy and CLIPBOARD_AVAILABLE:
+                try:
+                    pyperclip.copy(text)
+                except Exception:
+                    pass
 
-        # Auto-paste immediately, then show popup for reference/editing
-        if self.config.auto_paste:
-            QTimer.singleShot(100, lambda: self._type(text))
+            # Auto-paste immediately, then show popup for reference/editing
+            if self.config.auto_paste:
+                QTimer.singleShot(100, lambda: self._type(text))
         self._show_text_popup(text)
 
         logger.debug("_done() finished, _processing=%s", self._processing)
@@ -967,12 +1102,6 @@ class MainWindow(QMainWindow):
         self.close_btn.show()
 
         logger.debug("_error() called: %s -> %s", err, user_msg)
-        self._quality_monitor.record_result(
-            text_len=0,
-            audio_duration=0,
-            backend=self.config.backend,
-            model=self.config.model_size,
-        )
 
     def _show_error_popup(self, message: str):
         """Show error message in TextPopup with retry button."""
@@ -1042,8 +1171,8 @@ class MainWindow(QMainWindow):
                     lambda btn_id: self._quality_profile_changed(profile_ids.get(btn_id, "balanced"))
                 )
 
-                # Connect backend change to update models
-                self._settings.backend_combo.currentIndexChanged.connect(self._backend_changed)
+                # "Проверить микрофон…" opens the first-run dialog again
+                self._settings.check_mic_btn.clicked.connect(self.show_first_run_dialog)
 
                 # Init auto-stop controls
                 self._init_auto_stop_controls()
@@ -1070,46 +1199,6 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error("SHOW_SETTINGS_FAILED | %s", e, exc_info=True)
             QMessageBox.information(self, "Ошибка", f"Не удалось открыть настройки:\n{e}")
-
-    def _backend_changed(self):
-        bid = self._settings.backend_combo.currentData()
-        if self._processing and bid != self.config.backend:
-            # Engine is transcribing: reject and revert the combo
-            self.status_update.emit("Дождитесь окончания транскрибации")
-            self._settings.backend_combo.blockSignals(True)
-            idx = self._settings.backend_combo.findData(self.config.backend)
-            if idx >= 0:
-                self._settings.backend_combo.setCurrentIndex(idx)
-            self._settings.backend_combo.blockSignals(False)
-            return
-        if bid != self.config.backend:
-            old_backend = self.config.backend
-            old_model = self.config.model_size
-            cr = get_reporter()
-            if cr:
-                cr.set_context("BACKEND_SWITCH", backend=bid, previous_backend=old_backend)
-            try:
-                self.config.backend = bid
-                self._settings.model_combo.blockSignals(True)
-                self._settings._update_model_options()
-                self._settings.model_combo.blockSignals(False)
-                default = {"whisper": "base", "sherpa": "giga-am-v3-ru", "podlodka-turbo": "podlodka-turbo", "groq": "whisper-large-v3-turbo"}.get(bid, "base")
-                self.config.model_size = default
-                self.config.save()
-                if not self.transcriber.switch_backend(bid, default):
-                    raise RuntimeError("транскрибатор занят, попробуйте после окончания")
-                self._load_model()
-                self._update_model_info_label()
-            except Exception as e:
-                self._settings.model_combo.blockSignals(False)
-                logger.error("BACKEND_SWITCH_FAILED | %s", e, exc_info=True)
-                self.config.backend = old_backend
-                self.config.model_size = old_model
-                self.config.save()
-                self._settings.model_combo.blockSignals(True)
-                self._settings._update_model_options()
-                self._settings.model_combo.blockSignals(False)
-                self.status_update.emit(f"Ошибка смены бэкенда: {e}")
 
     def _model_changed(self):
         mid = self._settings.model_combo.currentData()
@@ -1226,15 +1315,10 @@ class MainWindow(QMainWindow):
                 # combo mutations must not re-fire _backend/_model_changed
                 # with intermediate garbage values)
                 if self._settings:
-                    self._settings.backend_combo.blockSignals(True)
                     self._settings.model_combo.blockSignals(True)
                     try:
-                        backend_idx = self._settings.backend_combo.findData(self.config.backend)
-                        if backend_idx >= 0:
-                            self._settings.backend_combo.setCurrentIndex(backend_idx)
                         self._settings._update_model_options()
                     finally:
-                        self._settings.backend_combo.blockSignals(False)
                         self._settings.model_combo.blockSignals(False)
 
                 logger.info("QUALITY_PROFILE_CHANGED | %s", profile)
@@ -1399,7 +1483,7 @@ class MainWindow(QMainWindow):
     def _quit(self):
         self._shutting_down = True
 
-        # Stop recording if in progress
+        # Stop recording if in progress (bounded ≤2s — no device close here)
         if self._recording:
             self._recording = False
             self._rec_timer.stop()
@@ -1407,6 +1491,14 @@ class MainWindow(QMainWindow):
                 self.recorder.stop()
             except Exception:
                 pass
+
+        # Close the persistent stream with a 3s budget: a degraded WASAPI
+        # close can take 14s+ — quit never waits for it, process exit reclaims
+        close_thread = threading.Thread(target=self.recorder.close_stream, daemon=True)
+        close_thread.start()
+        close_thread.join(timeout=3.0)
+        if close_thread.is_alive():
+            logger.warning("AUDIO_CLOSE_INCOMPLETE | stream close still running at quit")
 
         # Cancel any in-flight transcription, then wait for the worker
         try:
