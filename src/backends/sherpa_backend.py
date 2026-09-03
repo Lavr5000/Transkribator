@@ -177,8 +177,6 @@ class SherpaBackend(BaseBackend):
 
     def _get_vad_model_dir(self) -> Path:
         """Get Silero VAD model directory, download if missing."""
-        from huggingface_hub import snapshot_download
-
         # In PyInstaller frozen build use exe directory; in dev use source root
         if hasattr(sys, '_MEIPASS'):
             vad_dir = Path(sys._MEIPASS) / "models" / "sherpa" / "silero-vad"
@@ -192,6 +190,11 @@ class SherpaBackend(BaseBackend):
         # ships silero_vad.onnx (already in the fallback list at line ~259).
         if not any((vad_dir / n).exists() for n in ("silero_vad.onnx", "v4.onnx", "model.onnx")):
             try:
+                # ponytail: imported here, not at module/function top - the frozen
+                # build excludes huggingface_hub and ships the .onnx, so a top-level
+                # import killed VAD in the EXE while the model sat right next to it.
+                from huggingface_hub import snapshot_download
+
                 snapshot_download(
                     repo_id="deepghs/silero-vad-onnx",
                     local_dir=str(vad_dir),
