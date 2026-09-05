@@ -8,11 +8,14 @@ logger = logging.getLogger("transkribator")
 
 from .text_processor import TextProcessor
 
-try:
-    from deepmultilingualpunctuation import PunctuationModel
-    PUNCTUATION_AVAILABLE = True
-except ImportError:
-    PUNCTUATION_AVAILABLE = False
+# ponytail: only probe for the package here, import it in _add_punctuation.
+# `import deepmultilingualpunctuation` pulls transformers + torch (~1.2 GB of
+# private bytes, torch_cpu.dll alone is 250 MB) into the tray process at
+# startup, and the default giga-am-v3-ru-punct model never calls it — that
+# was the floor idle unload could not get below (1.45 GB after IDLE_UNLOAD).
+import importlib.util
+PUNCTUATION_AVAILABLE = importlib.util.find_spec("deepmultilingualpunctuation") is not None
+if not PUNCTUATION_AVAILABLE:
     logger.info("PUNCTUATION_MODEL_NOT_AVAILABLE | install deepmultilingualpunctuation")
 
 # Import phonetic corrections
@@ -593,6 +596,7 @@ class EnhancedTextProcessor(TextProcessor):
                 os.environ["HF_HUB_OFFLINE"] = "1"
                 os.environ["TRANSFORMERS_OFFLINE"] = "1"
                 try:
+                    from deepmultilingualpunctuation import PunctuationModel
                     self.punctuation_model = PunctuationModel()
                 finally:
                     for k, v in prev.items():

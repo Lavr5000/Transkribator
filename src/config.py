@@ -67,6 +67,10 @@ class Config:
     min_silence_duration_ms: int = 800  # Min silence to mark speech end (milliseconds)
     min_speech_duration_ms: int = 500  # Min speech to start detection (milliseconds)
 
+    # Release the ASR model after this many minutes without dictation
+    # (0 = keep resident forever). Reload on next use costs 2-4 s.
+    idle_unload_min: int = 10
+
     # Auto-stop on silence
     auto_stop_enabled: bool = False  # Auto-stop recording after silence
     auto_stop_silence_sec: float = 2.0  # Seconds of silence before auto-stop

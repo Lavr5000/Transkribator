@@ -141,6 +141,7 @@ def _make_window(tmp_path, monkeypatch, paste_calls, clipboard_calls, research_m
     window.history_manager._history = []
     window.history_manager._history_file = tmp_path / "history.json"
     window._quality_monitor = MagicMock()
+    window._idle_unloader = MagicMock()  # _done() arms it, _start()/_quit() cancel it
     window._settings = None
     window._shutting_down = False
     window._processing = False

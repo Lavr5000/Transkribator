@@ -6,6 +6,7 @@ second engine can be added back without touching this module.
 """
 import gc
 import logging
+import sys
 import threading
 import time
 from pathlib import Path
@@ -351,12 +352,12 @@ class Transcriber:
                 self._backend.unload_model()
             # Force garbage collection
             gc.collect()
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-            except ImportError:
-                pass
+            # Never `import torch` here: on a torch-equipped interpreter that
+            # loads ~300 MB in the very call meant to free memory. Only touch
+            # a torch that somebody else already imported.
+            torch = sys.modules.get("torch")
+            if torch is not None and torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
     def get_backend_info(self) -> dict:
         """Get information about the current backend."""

@@ -26,6 +26,7 @@ from PyQt6 import sip
 from .config import Config, MODEL_METADATA
 from .audio_recorder import AudioRecorder
 from .transcriber import Transcriber, get_available_backends
+from .idle_unload import IdleUnloader
 from .crash_reporter import get_reporter
 from . import hotkeys
 from .hotkeys import HotkeyManager, type_text, safe_paste_text, paste_from_clipboard
@@ -219,6 +220,13 @@ class MainWindow(QMainWindow):
         self._hover = False
         self._shutting_down = False  # Флаг для безопасного завершения
         self._starting = False  # Guard against double start press
+        # Drop the ~1.8 GB model after idle_unload_min minutes without
+        # dictation; transcribe() reloads it lazily on the next hotkey.
+        self._idle_unloader = IdleUnloader(
+            timeout_s=60 * max(0, int(getattr(self.config, "idle_unload_min", 10))),
+            unload_fn=self.transcriber.unload_model,
+            is_busy_fn=lambda: self._recording or self._processing or self._starting,
+        )
 
         self._setup_ui()
         self._setup_tray()
@@ -766,6 +774,7 @@ class MainWindow(QMainWindow):
     def _start(self):
         logger.debug("_start() called, _recording=%s, _processing=%s", self._recording, self._processing)
         self._starting = True
+        self._idle_unloader.cancel()
 
         # Reset VAD level bar to silence state (if exists)
         if self.vad_level_bar:
@@ -970,6 +979,7 @@ class MainWindow(QMainWindow):
             return
 
         self._processing = False  # Разблокируем
+        self._idle_unloader.arm()
         self._last_text = text
 
         # Вычисляем время транскрибации
@@ -1482,6 +1492,7 @@ class MainWindow(QMainWindow):
 
     def _quit(self):
         self._shutting_down = True
+        self._idle_unloader.cancel()
 
         # Stop recording if in progress (bounded ≤2s — no device close here)
         if self._recording:
