@@ -655,6 +655,10 @@ class MainWindow(QMainWindow):
             self.status_update.emit("Загрузка модели...")
             success = self.transcriber.load_model()
             self.status_update.emit("Готово" if success else "Ошибка загрузки")
+            if success:
+                # Startup preload counts as "last use": without this the model
+                # stays resident until the first dictation arms the timer.
+                self._idle_unloader.arm()
         threading.Thread(target=_load_with_status, daemon=True).start()
 
     def _cleanup_thread(self, timeout_ms: int = 2000):
