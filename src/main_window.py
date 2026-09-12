@@ -1191,6 +1191,12 @@ class MainWindow(QMainWindow):
                 # Init auto-stop controls
                 self._init_auto_stop_controls()
 
+                # Init VAD and noise controls (load from config + connect the
+                # handlers that persist every change; without this the sliders
+                # sit at their Qt defaults and nothing the user drags is saved)
+                self._init_vad_controls()
+                self._init_noise_controls()
+
                 # Connect sound feedback checkbox
                 self._settings.sound_feedback_cb.toggled.connect(self._sound_feedback_changed)
 
